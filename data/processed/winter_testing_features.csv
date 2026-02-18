@@ -1,0 +1,23 @@
+Driver,Team,TestingPaceRank,NormalizedPace,ReliabilityScore,LapsCompleted
+NOR,McLaren,1,0.5,1.0,100
+PIA,McLaren,2,0.5,1.0,100
+VER,Red Bull Racing,3,0.5,1.0,100
+HAD,Red Bull Racing,4,0.5,1.0,100
+RUS,Mercedes,5,0.5,1.0,100
+ANT,Mercedes,6,0.5,1.0,100
+LEC,Ferrari,7,0.5,1.0,100
+HAM,Ferrari,8,0.5,1.0,100
+ALO,Aston Martin,9,0.5,1.0,100
+STR,Aston Martin,10,0.5,1.0,100
+HUL,Audi,11,0.5,1.0,100
+BOR,Audi,12,0.5,1.0,100
+PER,Cadillac,13,0.5,1.0,100
+BOT,Cadillac,14,0.5,1.0,100
+GAS,Alpine,15,0.5,1.0,100
+COL,Alpine,16,0.5,1.0,100
+ALB,Williams,17,0.5,1.0,100
+SAI,Williams,18,0.5,1.0,100
+LAW,RB,19,0.5,1.0,100
+LIN,RB,20,0.5,1.0,100
+OCO,Haas F1 Team,21,0.5,1.0,100
+BEA,Haas F1 Team,22,0.5,1.0,100

@@ -1,0 +1,573 @@
+/* F1 2026 Race Predictor - CSS Styles */
+
+/* ==================== ROOT VARIABLES ==================== */
+:root {
+    /* F1 Brand Colors */
+    --f1-red: #E10600;
+    --f1-dark: #15151E;
+    --f1-gray: #38383F;
+    --f1-light-gray: #949498;
+    
+    /* UI Colors */
+    --primary: #E10600;
+    --secondary: #FF6B00;
+    --success: #00C853;
+    --warning: #FFB900;
+    --danger: #FF1744;
+    
+    /* Neutrals */
+    --bg-dark: #0A0A0F;
+    --bg-medium: #15151E;
+    --bg-light: #1E1E28;
+    --text-primary: #FFFFFF;
+    --text-secondary: #B3B3B3;
+    
+    /* Spacing */
+    --spacing-xs: 0.5rem;
+    --spacing-sm: 1rem;
+    --spacing-md: 1.5rem;
+    --spacing-lg: 2rem;
+    --spacing-xl: 3rem;
+    
+    /* Border Radius */
+    --radius-sm: 4px;
+    --radius-md: 8px;
+    --radius-lg: 12px;
+    --radius-xl: 16px;
+    
+    /* Shadows */
+    --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.3);
+    --shadow-md: 0 4px 8px rgba(0, 0, 0, 0.4);
+    --shadow-lg: 0 8px 16px rgba(0, 0, 0, 0.5);
+    --shadow-glow: 0 0 20px rgba(225, 6, 0, 0.3);
+    
+    /* Fonts */
+    --font-primary: 'Rajdhani', sans-serif;
+    --font-display: 'Orbitron', sans-serif;
+}
+
+/* ==================== RESET & BASE ==================== */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: var(--font-primary);
+    background: linear-gradient(135deg, var(--bg-dark) 0%, var(--bg-medium) 100%);
+    color: var(--text-primary);
+    min-height: 100vh;
+    line-height: 1.6;
+}
+
+.container {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 0 var(--spacing-md);
+}
+
+/* ==================== HEADER ==================== */
+.header {
+    background: linear-gradient(90deg, var(--bg-medium) 0%, var(--bg-light) 100%);
+    padding: var(--spacing-lg) 0;
+    box-shadow: var(--shadow-md);
+    border-bottom: 3px solid var(--primary);
+}
+
+.header-content {
+    text-align: center;
+}
+
+.logo {
+    font-family: var(--font-display);
+    font-size: 3rem;
+    font-weight: 900;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--spacing-md);
+    margin-bottom: var(--spacing-sm);
+}
+
+.logo-icon {
+    font-size: 3.5rem;
+    animation: drift 3s ease-in-out infinite;
+}
+
+@keyframes drift {
+    0%, 100% { transform: translateX(0); }
+    50% { transform: translateX(10px); }
+}
+
+.logo-text {
+    background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.tagline {
+    font-size: 1.1rem;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 2px;
+}
+
+/* ==================== MAIN ==================== */
+.main {
+    padding: var(--spacing-xl) 0;
+}
+
+.section {
+    background: var(--bg-light);
+    border-radius: var(--radius-lg);
+    padding: var(--spacing-lg);
+    margin-bottom: var(--spacing-lg);
+    box-shadow: var(--shadow-md);
+}
+
+.section-title {
+    font-family: var(--font-display);
+    font-size: 1.8rem;
+    margin-bottom: var(--spacing-md);
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    color: var(--primary);
+}
+
+.title-icon {
+    font-size: 2rem;
+}
+
+/* ==================== STATUS BANNER ==================== */
+.status-banner {
+    margin-bottom: var(--spacing-lg);
+    padding: var(--spacing-md);
+    border-radius: var(--radius-md);
+    text-align: center;
+}
+
+.status-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--spacing-sm);
+    color: var(--warning);
+}
+
+.status-success {
+    background: rgba(0, 200, 83, 0.1);
+    border: 2px solid var(--success);
+    color: var(--success);
+}
+
+.status-error {
+    background: rgba(255, 23, 68, 0.1);
+    border: 2px solid var(--danger);
+    color: var(--danger);
+}
+
+.spinner {
+    width: 20px;
+    height: 20px;
+    border: 3px solid transparent;
+    border-top-color: var(--warning);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+/* ==================== RACE SELECTOR ==================== */
+/* ==================== SPRINT INFO BANNER ==================== */
+.sprint-info{
+    margin-top: var(--spacing-md);
+    padding: var(--spacing-sm) var(--spacing-md);
+    background: linear-gradient(135deg, rgba(231, 76, 60, 0.18) 0%, rgba(192, 57, 43, 0.18) 100%);
+    border: 1px solid rgba(231, 76, 60, 0.45);
+    border-radius: var(--radius-md);
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+}
+
+.sprint-badge{
+    font-size: 0.9rem;
+    font-weight: 800;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--text-primary);
+    white-space: nowrap;
+}
+
+.sprint-details{
+    font-size: 0.95rem;
+    color: var(--text-secondary);
+}
+
+.race-selector {
+    display: flex;
+    gap: var(--spacing-md);
+    flex-wrap: wrap;
+}
+
+.select-input {
+    flex: 1;
+    min-width: 250px;
+    padding: var(--spacing-sm) var(--spacing-md);
+    background: var(--bg-medium);
+    color: var(--text-primary);
+    border: 2px solid var(--f1-gray);
+    border-radius: var(--radius-md);
+    font-family: var(--font-primary);
+    font-size: 1rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.select-input:hover {
+    border-color: var(--primary);
+}
+
+.select-input:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: var(--shadow-glow);
+}
+
+/* ==================== BUTTONS ==================== */
+.btn {
+    padding: var(--spacing-sm) var(--spacing-lg);
+    border: none;
+    border-radius: var(--radius-md);
+    font-family: var(--font-primary);
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.btn-primary {
+    background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+    color: var(--text-primary);
+    box-shadow: var(--shadow-md);
+}
+
+.btn-primary:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-lg), var(--shadow-glow);
+}
+
+.btn-primary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.btn-secondary {
+    background: var(--bg-medium);
+    color: var(--text-primary);
+    border: 2px solid var(--f1-gray);
+}
+
+.btn-secondary:hover {
+    border-color: var(--primary);
+    background: var(--bg-light);
+}
+
+.btn-large {
+    padding: var(--spacing-md) var(--spacing-xl);
+    font-size: 1.2rem;
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+}
+
+.btn-icon {
+    font-size: 1.5rem;
+}
+
+/* ==================== GRID CONTAINER ==================== */
+.grid-info {
+    margin-bottom: var(--spacing-md);
+    color: var(--text-secondary);
+}
+
+.grid-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: var(--spacing-md);
+}
+
+.grid-item {
+    background: var(--bg-medium);
+    border: 2px solid var(--f1-gray);
+    border-radius: var(--radius-md);
+    padding: var(--spacing-md);
+    transition: all 0.3s ease;
+}
+
+.grid-item:hover {
+    border-color: var(--primary);
+    transform: translateY(-2px);
+}
+
+.driver-header {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    margin-bottom: var(--spacing-sm);
+}
+
+.driver-number {
+    background: var(--primary);
+    color: var(--text-primary);
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 1.1rem;
+}
+
+.driver-info {
+    flex: 1;
+}
+
+.driver-name {
+    font-weight: 700;
+    font-size: 1.1rem;
+}
+
+.driver-team {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.grid-input {
+    width: 100%;
+    padding: var(--spacing-sm);
+    background: var(--bg-dark);
+    color: var(--text-primary);
+    border: 2px solid var(--f1-gray);
+    border-radius: var(--radius-sm);
+    font-family: var(--font-primary);
+    font-size: 1rem;
+    text-align: center;
+    transition: all 0.3s ease;
+}
+
+.grid-input:focus {
+    outline: none;
+    border-color: var(--primary);
+}
+
+/* ==================== PREDICT SECTION ==================== */
+.predict-section {
+    text-align: center;
+    margin: var(--spacing-xl) 0;
+}
+
+/* ==================== PREDICTIONS ==================== */
+.predictions-info {
+    background: var(--bg-medium);
+    padding: var(--spacing-md);
+    border-radius: var(--radius-md);
+    margin-bottom: var(--spacing-md);
+    text-align: center;
+    font-size: 1.2rem;
+    font-weight: 600;
+}
+
+.predictions-container {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
+}
+
+.prediction-item {
+    display: grid;
+    grid-template-columns: 60px 1fr 100px;
+    gap: var(--spacing-md);
+    background: var(--bg-medium);
+    padding: var(--spacing-md);
+    border-radius: var(--radius-md);
+    border-left: 4px solid transparent;
+    transition: all 0.3s ease;
+    align-items: center;
+}
+
+.prediction-item:hover {
+    background: var(--bg-light);
+    transform: translateX(5px);
+}
+
+.prediction-item.position-1 {
+    border-left-color: #FFD700;
+    background: linear-gradient(90deg, rgba(255, 215, 0, 0.1) 0%, var(--bg-medium) 100%);
+}
+
+.prediction-item.position-2 {
+    border-left-color: #C0C0C0;
+    background: linear-gradient(90deg, rgba(192, 192, 192, 0.1) 0%, var(--bg-medium) 100%);
+}
+
+.prediction-item.position-3 {
+    border-left-color: #CD7F32;
+    background: linear-gradient(90deg, rgba(205, 127, 50, 0.1) 0%, var(--bg-medium) 100%);
+}
+
+.prediction-position {
+    font-family: var(--font-display);
+    font-size: 2rem;
+    font-weight: 700;
+    text-align: center;
+}
+
+.prediction-driver {
+    display: flex;
+    flex-direction: column;
+}
+
+.prediction-driver-name {
+    font-weight: 700;
+    font-size: 1.1rem;
+}
+
+.prediction-driver-team {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+}
+
+.prediction-stats {
+    text-align: right;
+    font-size: 0.9rem;
+}
+
+.stat-label {
+    color: var(--text-secondary);
+}
+
+.stat-value {
+    font-weight: 600;
+}
+
+.stat-value.positive {
+    color: var(--success);
+}
+
+.stat-value.negative {
+    color: var(--danger);
+}
+
+.predictions-footer {
+    margin-top: var(--spacing-lg);
+    padding-top: var(--spacing-lg);
+    border-top: 1px solid var(--f1-gray);
+}
+
+.disclaimer {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    text-align: center;
+}
+
+/* ==================== FOOTER ==================== */
+.footer {
+    background: var(--bg-medium);
+    padding: var(--spacing-lg) 0;
+    margin-top: var(--spacing-xl);
+    text-align: center;
+    border-top: 3px solid var(--primary);
+}
+
+.footer p {
+    margin: var(--spacing-xs) 0;
+    color: var(--text-secondary);
+}
+
+.footer-note {
+    font-size: 0.85rem;
+}
+
+/* ==================== LOADING OVERLAY ==================== */
+.loading-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(10, 10, 15, 0.95);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.loading-content {
+    text-align: center;
+}
+
+.loading-spinner {
+    width: 60px;
+    height: 60px;
+    border: 6px solid transparent;
+    border-top-color: var(--primary);
+    border-bottom-color: var(--secondary);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin: 0 auto var(--spacing-md);
+}
+
+.loading-text {
+    font-size: 1.2rem;
+    color: var(--text-primary);
+}
+
+/* ==================== UTILITY CLASSES ==================== */
+.hidden {
+    display: none !important;
+}
+
+/* ==================== RESPONSIVE ==================== */
+@media (max-width: 768px) {
+    .logo {
+        font-size: 2rem;
+        flex-direction: column;
+        gap: var(--spacing-sm);
+    }
+    
+    .logo-icon {
+        font-size: 2.5rem;
+    }
+    
+    .tagline {
+        font-size: 0.9rem;
+    }
+    
+    .grid-container {
+        grid-template-columns: 1fr;
+    }
+    
+    .race-selector {
+        flex-direction: column;
+    }
+    
+    .prediction-item {
+        grid-template-columns: 50px 1fr;
+        gap: var(--spacing-sm);
+    }
+    
+    .prediction-stats {
+        grid-column: 2;
+        text-align: left;
+        margin-top: var(--spacing-xs);
+    }
+}

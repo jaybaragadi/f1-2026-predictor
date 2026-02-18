@@ -1,0 +1,23 @@
+DriverNumber,DriverCode,DriverName,Team,PreviousChampionships,RookieYear,IsRookie2026,WasRookie2025,IsChampion,IsDefendingChampion
+1,NOR,Lando Norris,McLaren,1,,0,0,1,1
+81,PIA,Oscar Piastri,McLaren,0,,0,0,0,0
+3,VER,Max Verstappen,Red Bull Racing,3,,0,0,1,0
+6,HAD,Isack Hadjar,Red Bull Racing,0,2025.0,0,1,0,0
+63,RUS,George Russell,Mercedes,0,,0,0,0,0
+12,ANT,Andrea Kimi Antonelli,Mercedes,0,2025.0,0,1,0,0
+16,LEC,Charles Leclerc,Ferrari,0,,0,0,0,0
+44,HAM,Lewis Hamilton,Ferrari,7,,0,0,1,0
+14,ALO,Fernando Alonso,Aston Martin,2,,0,0,1,0
+18,STR,Lance Stroll,Aston Martin,0,,0,0,0,0
+27,HUL,Nico Hulkenberg,Audi,0,,0,0,0,0
+5,BOR,Gabriel Bortoleto,Audi,0,2025.0,0,1,0,0
+11,PER,Sergio Perez,Cadillac,0,,0,0,0,0
+77,BOT,Valtteri Bottas,Cadillac,0,,0,0,0,0
+10,GAS,Pierre Gasly,Alpine,0,,0,0,0,0
+43,COL,Franco Colapinto,Alpine,0,2025.0,0,1,0,0
+23,ALB,Alexander Albon,Williams,0,,0,0,0,0
+55,SAI,Carlos Sainz,Williams,0,,0,0,0,0
+30,LAW,Liam Lawson,RB,0,2025.0,0,1,0,0
+41,LIN,Arvid Lindblad,RB,0,2026.0,1,0,0,0
+31,OCO,Esteban Ocon,Haas F1 Team,0,,0,0,0,0
+87,BEA,Oliver Bearman,Haas F1 Team,0,2025.0,0,1,0,0

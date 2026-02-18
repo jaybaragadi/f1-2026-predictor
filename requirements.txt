@@ -1,0 +1,26 @@
+# F1 2026 Predictor - Windows Compatible Requirements
+# Uses versions with pre-built wheels (no compilation needed)
+
+# Core Data Science
+numpy==1.24.3
+pandas==2.0.3
+scikit-learn==1.3.2
+
+# Web Framework
+Flask==3.0.0
+Flask-CORS==4.0.0
+
+# Model Serialization
+joblib==1.3.2
+
+# Machine Learning
+xgboost==2.0.3
+
+# F1 Data Collection
+fastf1==3.2.0
+
+# Production Server (Linux only - skip on Windows)
+# gunicorn==21.2.0
+
+# Optional: If you need gunicorn equivalent on Windows
+# waitress==2.1.2

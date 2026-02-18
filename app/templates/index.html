@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>F1 2026 Race Predictor 🏎️</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@300;400;500;600;700&family=Orbitron:wght@400;500;700;900&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="container">
+            <div class="header-content">
+                <h1 class="logo">
+                    <span class="logo-icon">🏎️</span>
+                    <span class="logo-text">F1 2026 Race Predictor</span>
+                </h1>
+                <p class="tagline">AI-Powered Race Position Predictions</p>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main">
+        <div class="container">
+            
+            <!-- Model Status Banner -->
+            <div id="model-status" class="status-banner">
+                <div class="status-loading">
+                    <div class="spinner"></div>
+                    <span>Loading model...</span>
+                </div>
+            </div>
+
+            <!-- Race Selection -->
+            <section class="section">
+                <h2 class="section-title">
+                    <span class="title-icon">🏁</span>
+                    Select Race
+                </h2>
+                <div class="race-selector">
+                    <select id="race-select" class="select-input">
+                        <option value="">Loading races...</option>
+                    </select>
+                    <button id="load-default-grid" class="btn btn-secondary">
+                        Load Default Grid
+                    </button>
+                </div>
+
+                
+            </section>
+
+            <!-- Grid Positions Input -->
+            <section class="section">
+                <h2 class="section-title">
+                    <span class="title-icon">📊</span>
+                    Set Grid Positions
+                </h2>
+                <div class="grid-info">
+                    <p>Enter the starting grid positions for all 22 drivers</p>
+                </div>
+                <div id="grid-container" class="grid-container">
+                    <!-- Grid inputs will be populated by JavaScript -->
+                </div>
+            </section>
+
+            <!-- Predict Button -->
+            <div class="predict-section">
+                <button id="predict-btn" class="btn btn-primary btn-large" disabled>
+                    <span class="btn-text">Predict Race Results</span>
+                    <span class="btn-icon">🚀</span>
+                </button>
+            </div>
+
+            <!-- Predictions Display -->
+            <section id="predictions-section" class="section hidden">
+                <h2 class="section-title">
+                    <span class="title-icon">🏆</span>
+                    Predicted Race Results
+                </h2>
+                <div id="predictions-info" class="predictions-info">
+                    <!-- Race name will be inserted here -->
+                </div>
+                <div id="predictions-container" class="predictions-container">
+                    <!-- Predictions will be populated by JavaScript -->
+                </div>
+                <div class="predictions-footer">
+                    <p class="disclaimer">
+                        ⚠️ Predictions are based on historical data (2022-2025) and may not account for 2026 regulation changes or unforeseen circumstances.
+                    </p>
+                </div>
+            </section>
+
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <p>&copy; 2026 F1 Race Predictor | Built with FastF1, XGBoost, Flask</p>
+            <p class="footer-note">Model trained on 2022-2025 F1 data | Predictions for entertainment purposes</p>
+        </div>
+    </footer>
+
+    <!-- Loading Overlay -->
+    <div id="loading-overlay" class="loading-overlay hidden">
+        <div class="loading-content">
+            <div class="loading-spinner"></div>
+            <p class="loading-text">Making predictions...</p>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>
