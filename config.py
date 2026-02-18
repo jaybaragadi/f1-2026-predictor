@@ -33,7 +33,7 @@ MIN_RACES_FOR_AVG = 3
 RETRAIN_AFTER_RACES = 1
 SECRET_KEY = 'f1-2026-predictor'
 HOST = '0.0.0.0'
-PORT = 5000
+PORT = 8080
 CORS_ORIGINS = ['*']
 
 # Model training
