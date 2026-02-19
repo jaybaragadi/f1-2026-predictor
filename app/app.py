@@ -1,6 +1,6 @@
 """
 Flask Backend for F1 2026 Race Predictor
-ORIGINAL FULL ML VERSION - 82% Accuracy with all 30 features
+CORRECTED VERSION - Fixed driver name display issue
 """
 
 import os
@@ -215,7 +215,7 @@ class F1RacePredictor:
                 
                 # If no match, try DriverName match (in case codes differ)
                 if len(driver_historical) == 0 and "DriverName" in self.training_data.columns:
-                    driver_name = driver.get("name", "")
+                    driver_name = driver.get("DriverName", driver.get("name", ""))
                     driver_historical = self.training_data[
                         self.training_data["DriverName"] == driver_name
                     ]
@@ -233,7 +233,6 @@ class F1RacePredictor:
                     driver_total_pts = 0.0
             else:
                 # New driver or no data - use intelligent defaults based on grid position
-                # Champions qualify well, so if grid_pos is good, assume they're good
                 if grid_pos <= 5:
                     driver_avg_pos = 5.0  # Assume frontrunner
                     driver_best_pos = 1.0
@@ -294,9 +293,9 @@ class F1RacePredictor:
                 # Recency weight (1 feature)
                 "RecencyWeight": 2.0,
                 
-                # Metadata (for results)
+                # Metadata (for results) - CORRECTED FIELD NAMES
                 "DriverNumber": driver_num_int,
-                "DriverName": driver.get("name", ""),
+                "DriverName": driver.get("DriverName", driver.get("name", "Unknown Driver")),
                 "DriverCode": driver_code,
                 "Team": driver_team,
             }
@@ -328,7 +327,7 @@ class F1RacePredictor:
                 "predicted_position": float(row["PredictedPosition"]),
                 "driver_number": int(row["DriverNumber"]),
                 "driver_code": row["DriverCode"],
-                "driver_name": row["DriverName"],
+                "driver_name": row["DriverName"],  # This should now work correctly
                 "team": row["Team"],
                 "grid_position": int(row["GridPosition"]),
                 "position_change": int(row["GridPosition"]) - idx,
@@ -509,7 +508,7 @@ def predict_race():
                 "predictedPosition": p["predicted_position"],
                 "driverNumber": driver_num,
                 "driverCode": p.get("driver_code", d.get("code")),
-                "driverName": p["driver_name"],
+                "driverName": p["driver_name"],  # Should now show correct driver names
                 "team": p["team"],
                 "gridPosition": p["grid_position"],
                 "positionsGained": p["position_change"],
@@ -540,5 +539,4 @@ def health_check():
 
 if __name__ == "__main__":
     init_predictor()
-    port = int(os.getenv('PORT', 8080))
-    app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
+    app.run(host="127.0.0.1", port=5001, debug=False, use_reloader=False)
