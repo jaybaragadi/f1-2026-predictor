@@ -347,8 +347,6 @@ This is an educational/entertainment project for F1 fans and data science enthus
 ## 📞 Contact & Support
 
 - **GitHub**: [@jaybaragadi](https://github.com/jaybaragadi)
-- **Issues**: [Report bugs or request features](https://github.com/jaybaragadi/f1-2026-predictor/issues)
-- **Discussions**: [Community discussions and ideas](https://github.com/jaybaragadi/f1-2026-predictor/discussions)
 
 ---
 
