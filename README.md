@@ -16,10 +16,7 @@ An AI-powered Formula 1 race prediction system that uses machine learning to pre
 - **⚡ Real-Time Predictions**: Instant results for all 22 drivers
 - **🔄 Continuous Learning**: Model improves with each 2026 race
 
-## 📸 Screenshots
 
-### Main Interface
-*Beautiful F1-themed interface with grid position inputs*
 
 ### Example Predictions
 **Different circuits produce different results:**
