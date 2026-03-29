@@ -318,9 +318,14 @@ class F1RacePredictor:
         """Return predictions using full ML model"""
         features_df = self.prepare_features(grid_positions_by_number, race_info)
         
-        # Select only the features the model expects (all 30)
+        # Select only the features the model expects
         X = features_df[self.feature_columns]
-        X_scaled = self.scaler.transform(X)
+        # Keep as DataFrame so sub-models (Ridge/Lasso/etc.) retain feature names
+        X_scaled = pd.DataFrame(
+            self.scaler.transform(X),
+            columns=self.feature_columns,
+            index=X.index,
+        )
 
         # Make predictions using 5-algorithm ensemble
         preds = self.model.predict(X_scaled)
@@ -366,7 +371,7 @@ def init_predictor():
             "season": 2026,
             "defending_champion": "Lando Norris (#1)",
             "track_aware": any('Track' in f for f in predictor.feature_columns),
-            "accuracy": "82.1%",
+            "accuracy": "83.9%",
             "model_type": "5-Algorithm Ensemble",
         }
         print("\nModel Status: ✓ FULL ML MODEL LOADED")

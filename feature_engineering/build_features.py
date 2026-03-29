@@ -332,6 +332,20 @@ def build_features(df):
     print(f"Input samples: {len(df)}")
     print(f"Input features: {len(df.columns)}")
 
+    # Normalise column names from the raw CSV format:
+    # historical_race_results.csv uses 'RaceName' for circuit and has no 'Date' column.
+    if 'Circuit' not in df.columns and 'RaceName' in df.columns:
+        df = df.rename(columns={'RaceName': 'Circuit'})
+    if 'Date' not in df.columns:
+        if 'Year' in df.columns and 'Round' in df.columns:
+            # Synthesise a sortable datetime from Year + Round.
+            # Use Jan-1 of the year + (round-1)*14 days so all 24 rounds are valid dates.
+            base = pd.to_datetime(df['Year'].astype(str) + '-01-01', format='%Y-%m-%d')
+            df['Date'] = base + pd.to_timedelta((df['Round'].astype(int) - 1) * 14, unit='D')
+        else:
+            print("Cannot derive 'Date' column — need 'Year' and 'Round' columns")
+            return None
+
     # Ensure required columns exist
     required = ['Date', 'DriverCode', 'Team', 'Circuit', 'Position', 'GridPosition', 'Points', 'Status', 'Year']
     missing = [col for col in required if col not in df.columns]
