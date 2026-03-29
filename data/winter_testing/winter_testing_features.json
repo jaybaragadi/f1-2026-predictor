@@ -1,0 +1,443 @@
+{
+  "metadata": {
+    "generated_date": "2026-02-22T23:14:19.744065",
+    "testing_location": "Bahrain International Circuit",
+    "testing_dates": "February 11-13, 2026",
+    "total_laps_analyzed": 2237,
+    "drivers_analyzed": 22,
+    "teams_analyzed": 11
+  },
+  "driver_features": {
+    "COL": {
+      "driver_name": "Franco Colapinto",
+      "team_name": "Alpine",
+      "best_lap_time": 95.806,
+      "avg_lap_time": 101.903,
+      "median_lap_time": 101.381,
+      "lap_time_std": 3.851,
+      "total_laps": 105,
+      "consistency_score": 0.0378,
+      "race_simulation_avg": 101.861,
+      "race_simulation_std": 3.846,
+      "long_run_pace": 102.006
+    },
+    "GAS": {
+      "driver_name": "Pierre Gasly",
+      "team_name": "Alpine",
+      "best_lap_time": 96.723,
+      "avg_lap_time": 102.939,
+      "median_lap_time": 100.743,
+      "lap_time_std": 6.249,
+      "total_laps": 97,
+      "consistency_score": 0.0607,
+      "race_simulation_avg": 103.298,
+      "race_simulation_std": 6.64,
+      "long_run_pace": 103.321
+    },
+    "STR": {
+      "driver_name": "Lance Stroll",
+      "team_name": "Aston Martin",
+      "best_lap_time": 98.165,
+      "avg_lap_time": 104.663,
+      "median_lap_time": 103.292,
+      "lap_time_std": 5.121,
+      "total_laps": 48,
+      "consistency_score": 0.0489,
+      "race_simulation_avg": 104.288,
+      "race_simulation_std": 4.854,
+      "long_run_pace": 104.744
+    },
+    "BOR": {
+      "driver_name": "Gabriel Bortoleto",
+      "team_name": "Audi",
+      "best_lap_time": 96.67,
+      "avg_lap_time": 103.168,
+      "median_lap_time": 100.879,
+      "lap_time_std": 5.568,
+      "total_laps": 78,
+      "consistency_score": 0.054,
+      "race_simulation_avg": 102.849,
+      "race_simulation_std": 5.367,
+      "long_run_pace": 104.832
+    },
+    "HUL": {
+      "driver_name": "Nico H\u00fclkenberg",
+      "team_name": "Audi",
+      "best_lap_time": 96.291,
+      "avg_lap_time": 102.915,
+      "median_lap_time": 100.214,
+      "lap_time_std": 6.149,
+      "total_laps": 109,
+      "consistency_score": 0.0598,
+      "race_simulation_avg": 102.502,
+      "race_simulation_std": 5.821,
+      "long_run_pace": 102.663
+    },
+    "PER": {
+      "driver_name": "Sergio P\u00e9rez",
+      "team_name": "Cadillac",
+      "best_lap_time": 98.653,
+      "avg_lap_time": 103.146,
+      "median_lap_time": 102.095,
+      "lap_time_std": 3.86,
+      "total_laps": 114,
+      "consistency_score": 0.0374,
+      "race_simulation_avg": 103.188,
+      "race_simulation_std": 3.969,
+      "long_run_pace": 102.884
+    },
+    "BOT": {
+      "driver_name": "Valtteri Bottas",
+      "team_name": "Cadillac",
+      "best_lap_time": 96.824,
+      "avg_lap_time": 102.763,
+      "median_lap_time": 102.357,
+      "lap_time_std": 2.808,
+      "total_laps": 83,
+      "consistency_score": 0.0273,
+      "race_simulation_avg": 102.769,
+      "race_simulation_std": 2.884,
+      "long_run_pace": 102.462
+    },
+    "LEC": {
+      "driver_name": "Charles Leclerc",
+      "team_name": "Ferrari",
+      "best_lap_time": 94.273,
+      "avg_lap_time": 100.639,
+      "median_lap_time": 98.799,
+      "lap_time_std": 5.358,
+      "total_laps": 128,
+      "consistency_score": 0.0532,
+      "race_simulation_avg": 100.19,
+      "race_simulation_std": 4.97,
+      "long_run_pace": 100.836
+    },
+    "HAM": {
+      "driver_name": "Lewis Hamilton",
+      "team_name": "Ferrari",
+      "best_lap_time": 94.209,
+      "avg_lap_time": 100.473,
+      "median_lap_time": 99.343,
+      "lap_time_std": 4.394,
+      "total_laps": 114,
+      "consistency_score": 0.0437,
+      "race_simulation_avg": 100.424,
+      "race_simulation_std": 4.396,
+      "long_run_pace": 99.78
+    },
+    "OCO": {
+      "driver_name": "Esteban Ocon",
+      "team_name": "Haas",
+      "best_lap_time": 95.578,
+      "avg_lap_time": 100.874,
+      "median_lap_time": 100.479,
+      "lap_time_std": 3.283,
+      "total_laps": 112,
+      "consistency_score": 0.0325,
+      "race_simulation_avg": 100.896,
+      "race_simulation_std": 3.403,
+      "long_run_pace": 100.656
+    },
+    "NOR": {
+      "driver_name": "Lando Norris",
+      "team_name": "McLaren",
+      "best_lap_time": 94.669,
+      "avg_lap_time": 99.987,
+      "median_lap_time": 98.613,
+      "lap_time_std": 4.62,
+      "total_laps": 108,
+      "consistency_score": 0.0462,
+      "race_simulation_avg": 100.045,
+      "race_simulation_std": 4.659,
+      "long_run_pace": 99.116
+    },
+    "PIA": {
+      "driver_name": "Oscar Piastri",
+      "team_name": "McLaren",
+      "best_lap_time": 94.549,
+      "avg_lap_time": 100.803,
+      "median_lap_time": 99.548,
+      "lap_time_std": 5.041,
+      "total_laps": 126,
+      "consistency_score": 0.05,
+      "race_simulation_avg": 100.85,
+      "race_simulation_std": 5.068,
+      "long_run_pace": 100.532
+    },
+    "ANT": {
+      "driver_name": "Andrea Kimi Antonelli",
+      "team_name": "Mercedes",
+      "best_lap_time": 93.669,
+      "avg_lap_time": 99.254,
+      "median_lap_time": 98.781,
+      "lap_time_std": 2.537,
+      "total_laps": 54,
+      "consistency_score": 0.0256,
+      "race_simulation_avg": 99.268,
+      "race_simulation_std": 1.972,
+      "long_run_pace": 99.513
+    },
+    "RUS": {
+      "driver_name": "George Russell",
+      "team_name": "Mercedes",
+      "best_lap_time": 93.918,
+      "avg_lap_time": 100.515,
+      "median_lap_time": 99.714,
+      "lap_time_std": 3.624,
+      "total_laps": 113,
+      "consistency_score": 0.0361,
+      "race_simulation_avg": 100.295,
+      "race_simulation_std": 3.359,
+      "long_run_pace": 99.622
+    },
+    "LIN": {
+      "driver_name": "Arvid Lindblad",
+      "team_name": "Racing Bulls",
+      "best_lap_time": 97.47,
+      "avg_lap_time": 102.794,
+      "median_lap_time": 102.028,
+      "lap_time_std": 3.948,
+      "total_laps": 97,
+      "consistency_score": 0.0384,
+      "race_simulation_avg": 102.762,
+      "race_simulation_std": 3.814,
+      "long_run_pace": 102.304
+    },
+    "VER": {
+      "driver_name": "Max Verstappen",
+      "team_name": "Red Bull Racing",
+      "best_lap_time": 94.798,
+      "avg_lap_time": 99.822,
+      "median_lap_time": 98.648,
+      "lap_time_std": 4.582,
+      "total_laps": 130,
+      "consistency_score": 0.0459,
+      "race_simulation_avg": 99.81,
+      "race_simulation_std": 4.608,
+      "long_run_pace": 98.786
+    },
+    "ALB": {
+      "driver_name": "Alexander Albon",
+      "team_name": "Williams",
+      "best_lap_time": 96.793,
+      "avg_lap_time": 102.944,
+      "median_lap_time": 101.578,
+      "lap_time_std": 4.933,
+      "total_laps": 139,
+      "consistency_score": 0.0479,
+      "race_simulation_avg": 102.83,
+      "race_simulation_std": 4.741,
+      "long_run_pace": 101.262
+    },
+    "SAI": {
+      "driver_name": "Carlos Sainz",
+      "team_name": "Williams",
+      "best_lap_time": 97.234,
+      "avg_lap_time": 104.967,
+      "median_lap_time": 102.564,
+      "lap_time_std": 6.22,
+      "total_laps": 107,
+      "consistency_score": 0.0593,
+      "race_simulation_avg": 105.16,
+      "race_simulation_std": 6.388,
+      "long_run_pace": 103.766
+    },
+    "ALO": {
+      "driver_name": "Fernando Alonso",
+      "team_name": "Aston Martin",
+      "best_lap_time": 98.96,
+      "avg_lap_time": 105.077,
+      "median_lap_time": 102.271,
+      "lap_time_std": 5.6,
+      "total_laps": 63,
+      "consistency_score": 0.0533,
+      "race_simulation_avg": 104.886,
+      "race_simulation_std": 5.504,
+      "long_run_pace": 104.338
+    },
+    "BEA": {
+      "driver_name": "Oliver Bearman",
+      "team_name": "Haas",
+      "best_lap_time": 95.394,
+      "avg_lap_time": 102.183,
+      "median_lap_time": 101.642,
+      "lap_time_std": 3.927,
+      "total_laps": 112,
+      "consistency_score": 0.0384,
+      "race_simulation_avg": 102.06,
+      "race_simulation_std": 3.873,
+      "long_run_pace": 102.48
+    },
+    "LAW": {
+      "driver_name": "Liam Lawson",
+      "team_name": "Racing Bulls",
+      "best_lap_time": 96.808,
+      "avg_lap_time": 103.097,
+      "median_lap_time": 101.494,
+      "lap_time_std": 5.157,
+      "total_laps": 102,
+      "consistency_score": 0.05,
+      "race_simulation_avg": 102.85,
+      "race_simulation_std": 4.861,
+      "long_run_pace": 102.815
+    },
+    "HAD": {
+      "driver_name": "Isack Hadjar",
+      "team_name": "Red Bull Racing",
+      "best_lap_time": 95.61,
+      "avg_lap_time": 101.046,
+      "median_lap_time": 99.632,
+      "lap_time_std": 5.074,
+      "total_laps": 98,
+      "consistency_score": 0.0502,
+      "race_simulation_avg": 100.864,
+      "race_simulation_std": 4.992,
+      "long_run_pace": 99.537
+    }
+  },
+  "team_features": {
+    "Alpine": {
+      "team_best_lap": 95.806,
+      "team_avg_lap": 102.4,
+      "total_laps": 202,
+      "reliability_score": 0.505,
+      "team_consistency_std": 5.157,
+      "drivers_count": 2,
+      "driver_best_laps": {
+        "COL": 95.806,
+        "GAS": 96.723
+      }
+    },
+    "Aston Martin": {
+      "team_best_lap": 98.165,
+      "team_avg_lap": 104.898,
+      "total_laps": 111,
+      "reliability_score": 0.278,
+      "team_consistency_std": 5.378,
+      "drivers_count": 2,
+      "driver_best_laps": {
+        "STR": 98.165,
+        "ALO": 98.96
+      }
+    },
+    "Audi": {
+      "team_best_lap": 96.291,
+      "team_avg_lap": 103.021,
+      "total_laps": 187,
+      "reliability_score": 0.468,
+      "team_consistency_std": 5.9,
+      "drivers_count": 2,
+      "driver_best_laps": {
+        "HUL": 96.291,
+        "BOR": 96.67
+      }
+    },
+    "Cadillac": {
+      "team_best_lap": 96.824,
+      "team_avg_lap": 102.985,
+      "total_laps": 197,
+      "reliability_score": 0.492,
+      "team_consistency_std": 3.453,
+      "drivers_count": 2,
+      "driver_best_laps": {
+        "BOT": 96.824,
+        "PER": 98.653
+      }
+    },
+    "Ferrari": {
+      "team_best_lap": 94.209,
+      "team_avg_lap": 100.561,
+      "total_laps": 242,
+      "reliability_score": 0.605,
+      "team_consistency_std": 4.918,
+      "drivers_count": 2,
+      "driver_best_laps": {
+        "HAM": 94.209,
+        "LEC": 94.273
+      }
+    },
+    "Haas": {
+      "team_best_lap": 95.394,
+      "team_avg_lap": 101.528,
+      "total_laps": 224,
+      "reliability_score": 0.56,
+      "team_consistency_std": 3.67,
+      "drivers_count": 2,
+      "driver_best_laps": {
+        "BEA": 95.394,
+        "OCO": 95.578
+      }
+    },
+    "McLaren": {
+      "team_best_lap": 94.549,
+      "team_avg_lap": 100.426,
+      "total_laps": 234,
+      "reliability_score": 0.585,
+      "team_consistency_std": 4.858,
+      "drivers_count": 2,
+      "driver_best_laps": {
+        "PIA": 94.549,
+        "NOR": 94.669
+      }
+    },
+    "Mercedes": {
+      "team_best_lap": 93.669,
+      "team_avg_lap": 100.107,
+      "total_laps": 167,
+      "reliability_score": 0.417,
+      "team_consistency_std": 3.356,
+      "drivers_count": 2,
+      "driver_best_laps": {
+        "ANT": 93.669,
+        "RUS": 93.918
+      }
+    },
+    "Racing Bulls": {
+      "team_best_lap": 96.808,
+      "team_avg_lap": 102.949,
+      "total_laps": 199,
+      "reliability_score": 0.497,
+      "team_consistency_std": 4.599,
+      "drivers_count": 2,
+      "driver_best_laps": {
+        "LAW": 96.808,
+        "LIN": 97.47
+      }
+    },
+    "Red Bull Racing": {
+      "team_best_lap": 94.798,
+      "team_avg_lap": 100.348,
+      "total_laps": 228,
+      "reliability_score": 0.57,
+      "team_consistency_std": 4.827,
+      "drivers_count": 2,
+      "driver_best_laps": {
+        "VER": 94.798,
+        "HAD": 95.61
+      }
+    },
+    "Williams": {
+      "team_best_lap": 96.793,
+      "team_avg_lap": 103.824,
+      "total_laps": 246,
+      "reliability_score": 0.615,
+      "team_consistency_std": 5.609,
+      "drivers_count": 2,
+      "driver_best_laps": {
+        "ALB": 96.793,
+        "SAI": 97.234
+      }
+    }
+  },
+  "usage_instructions": {
+    "description": "Winter testing features for F1 2026 race predictions",
+    "how_to_integrate": [
+      "1. Load this file in your prediction model",
+      "2. Use team_best_lap and team_avg_lap as new features",
+      "3. Use reliability_score to adjust DNF probabilities",
+      "4. Consider consistency_score for position variance",
+      "5. Weight these features at ~10-15% alongside historical data"
+    ],
+    "expected_accuracy_boost": "+4-6% based on winter testing performance"
+  }
+}

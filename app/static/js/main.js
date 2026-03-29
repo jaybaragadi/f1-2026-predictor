@@ -1,4 +1,4 @@
-// F1 2026 Race Predictor - JavaScript (FIXED + aligned with backend)
+// F1 2026 Race Predictor - JavaScript (WITH DUPLICATE GRID HIGHLIGHTING)
 
 // ==================== GLOBAL STATE ====================
 let appState = {
@@ -217,7 +217,7 @@ async function loadDefaultGrid() {
   }
 }
 
-// ==================== VALIDATE GRID INPUTS ====================
+// ==================== VALIDATE GRID INPUTS (WITH DUPLICATE HIGHLIGHTING) ====================
 function validateGridInputs() {
   const inputs = document.querySelectorAll('.grid-input');
   const raceSelect = document.getElementById('race-select');
@@ -229,28 +229,91 @@ function validateGridInputs() {
   }
 
   let allFilled = true;
-  const values = [];
+  const positionMap = {}; // Track which positions are used and by whom
+  const duplicatePositions = new Set(); // Track duplicate positions
 
+  // First pass: collect all positions and identify duplicates
   inputs.forEach(input => {
     const value = parseInt(input.value, 10);
+    
     if (!value || value < 1 || value > GRID_SIZE_DEFAULT) {
       allFilled = false;
     } else {
-      values.push(value);
+      // Track positions
+      if (!positionMap[value]) {
+        positionMap[value] = [];
+      }
+      positionMap[value].push(input);
+      
+      // Mark as duplicate if multiple inputs have same value
+      if (positionMap[value].length > 1) {
+        duplicatePositions.add(value);
+      }
     }
   });
 
-  const hasDuplicates = values.length !== new Set(values).size;
+  // Second pass: highlight duplicates and clear others
+  inputs.forEach(input => {
+    const value = parseInt(input.value, 10);
+    const gridItem = input.closest('.grid-item');
+    
+    // Remove all duplicate-related classes first
+    gridItem.classList.remove('duplicate-position');
+    input.classList.remove('duplicate-input');
+    
+    // Add duplicate styling if this position is duplicated
+    if (value && duplicatePositions.has(value)) {
+      gridItem.classList.add('duplicate-position');
+      input.classList.add('duplicate-input');
+    }
+  });
+
+  const hasDuplicates = duplicatePositions.size > 0;
   const raceChosen = !!(raceSelect && raceSelect.value);
 
+  // Show/hide duplicate warning
+  showDuplicateWarning(hasDuplicates, duplicatePositions);
+
+  // Enable predict button only if all conditions met
   if (allFilled && !hasDuplicates && raceChosen && appState.modelLoaded) {
     enablePredictButton();
   } else {
     disablePredictButton();
   }
+}
 
-  if (allFilled && hasDuplicates) {
-    showNotification('Duplicate grid positions detected', 'warning');
+// ==================== SHOW/HIDE DUPLICATE WARNING ====================
+function showDuplicateWarning(hasDuplicates, duplicatePositions) {
+  const gridSection = document.querySelector('.section');
+  let warningDiv = document.getElementById('duplicate-warning');
+
+  if (hasDuplicates) {
+    if (!warningDiv) {
+      warningDiv = document.createElement('div');
+      warningDiv.id = 'duplicate-warning';
+      warningDiv.className = 'duplicate-warning';
+      
+      // Insert after grid-info
+      const gridInfo = document.querySelector('.grid-info');
+      if (gridInfo) {
+        gridInfo.after(warningDiv);
+      }
+    }
+
+    const positions = Array.from(duplicatePositions).sort((a, b) => a - b);
+    const positionList = positions.map(p => `P${p}`).join(', ');
+    
+    warningDiv.innerHTML = `
+      ⚠️ <strong>Duplicate positions detected:</strong> ${positionList} 
+      <span class="duplicate-count">(${duplicatePositions.size} position${duplicatePositions.size > 1 ? 's' : ''})</span>
+      <br>
+      <small>Each position must be unique. Please correct highlighted entries.</small>
+    `;
+  } else {
+    // Remove warning if no duplicates
+    if (warningDiv) {
+      warningDiv.remove();
+    }
   }
 }
 

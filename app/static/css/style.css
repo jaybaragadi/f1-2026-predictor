@@ -1,4 +1,4 @@
-/* F1 2026 Race Predictor - CSS Styles */
+/* F1 2026 Race Predictor - CSS Styles (WITH DUPLICATE HIGHLIGHTING) */
 
 /* ==================== ROOT VARIABLES ==================== */
 :root {
@@ -298,6 +298,43 @@ body {
     color: var(--text-secondary);
 }
 
+/* ==================== DUPLICATE WARNING (NEW) ==================== */
+.duplicate-warning {
+    background: linear-gradient(135deg, rgba(255, 185, 0, 0.2) 0%, rgba(255, 185, 0, 0.1) 100%);
+    border: 2px solid var(--warning);
+    border-radius: var(--radius-md);
+    padding: var(--spacing-md);
+    margin-bottom: var(--spacing-md);
+    color: var(--text-primary);
+    animation: shake 0.5s ease-in-out;
+}
+
+@keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    25% { transform: translateX(-5px); }
+    75% { transform: translateX(5px); }
+}
+
+.duplicate-warning strong {
+    color: var(--warning);
+}
+
+.duplicate-count {
+    background: var(--warning);
+    color: var(--bg-dark);
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 0.85rem;
+    font-weight: 700;
+}
+
+.duplicate-warning small {
+    display: block;
+    margin-top: var(--spacing-xs);
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
 .grid-container {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
@@ -315,6 +352,33 @@ body {
 .grid-item:hover {
     border-color: var(--primary);
     transform: translateY(-2px);
+}
+
+/* ==================== DUPLICATE GRID HIGHLIGHTING (NEW) ==================== */
+.grid-item.duplicate-position {
+    border: 2px solid var(--warning) !important;
+    background: linear-gradient(135deg, rgba(255, 185, 0, 0.15) 0%, var(--bg-medium) 100%);
+    animation: pulse-duplicate 2s ease-in-out infinite;
+}
+
+@keyframes pulse-duplicate {
+    0%, 100% {
+        box-shadow: 0 0 0 0 rgba(255, 185, 0, 0.4);
+    }
+    50% {
+        box-shadow: 0 0 15px 5px rgba(255, 185, 0, 0.2);
+    }
+}
+
+.grid-input.duplicate-input {
+    border-color: var(--warning) !important;
+    background: rgba(255, 185, 0, 0.1) !important;
+    color: var(--warning) !important;
+    font-weight: 700;
+}
+
+.grid-input.duplicate-input::placeholder {
+    color: rgba(255, 185, 0, 0.5);
 }
 
 .driver-header {
