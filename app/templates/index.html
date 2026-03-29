@@ -48,7 +48,9 @@
                     </button>
                 </div>
 
-                
+                <div id="sprintInfo" class="sprint-banner hidden">
+                    <span>🏁 This is a Sprint Race weekend — predictions use sprint qualifying grid</span>
+                </div>
             </section>
 
             <!-- Grid Positions Input -->
@@ -98,10 +100,15 @@
     <!-- Footer -->
     <footer class="footer">
         <div class="container">
-            <p>&copy; 2026 F1 Race Predictor | Built with FastF1, XGBoost, Flask</p>
+            <p>&copy; 2026 F1 Race Predictor | Built with FastF1, 5-Algorithm Stacking Ensemble, Flask</p>
             <p class="footer-note">Model trained on 2022-2025 F1 data | Predictions for entertainment purposes</p>
         </div>
     </footer>
+
+    <!-- Notification Toast -->
+    <div id="notification-toast" class="notification-toast hidden">
+        <span id="notification-message"></span>
+    </div>
 
     <!-- Loading Overlay -->
     <div id="loading-overlay" class="loading-overlay hidden">

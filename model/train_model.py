@@ -62,7 +62,7 @@ class Config:
     MAX_TRAIN_TEST_GAP = 0.15  # 15% gap threshold
     
     # Hyperparameter tuning (set False for faster training)
-    TUNE_HYPERPARAMETERS = False  # Set True for better accuracy
+    TUNE_HYPERPARAMETERS = True  # Enabled for better generalisation
     
     # Feature selection (set True to reduce overfitting)
     USE_FEATURE_SELECTION = False

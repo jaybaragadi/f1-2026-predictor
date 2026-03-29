@@ -595,6 +595,56 @@ body {
     color: var(--text-primary);
 }
 
+/* ==================== SPRINT BANNER ==================== */
+.sprint-banner {
+    margin-top: var(--spacing-md);
+    padding: var(--spacing-sm) var(--spacing-md);
+    background: linear-gradient(135deg, rgba(231, 76, 60, 0.18) 0%, rgba(192, 57, 43, 0.18) 100%);
+    border: 1px solid rgba(231, 76, 60, 0.45);
+    border-radius: var(--radius-md);
+    font-size: 0.95rem;
+    color: var(--text-secondary);
+}
+
+/* ==================== NOTIFICATION TOAST ==================== */
+.notification-toast {
+    position: fixed;
+    bottom: 2rem;
+    right: 2rem;
+    padding: 0.75rem 1.25rem;
+    border-radius: var(--radius-md);
+    font-size: 0.95rem;
+    font-weight: 500;
+    z-index: 2000;
+    max-width: 320px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+    transition: opacity 0.3s ease;
+}
+
+.notification-success {
+    background: rgba(39, 174, 96, 0.92);
+    color: #fff;
+    border-left: 4px solid #27ae60;
+}
+
+.notification-error {
+    background: rgba(192, 57, 43, 0.92);
+    color: #fff;
+    border-left: 4px solid #e74c3c;
+}
+
+.notification-warning {
+    background: rgba(243, 156, 18, 0.92);
+    color: #fff;
+    border-left: 4px solid #f39c12;
+}
+
+.notification-info {
+    background: rgba(41, 128, 185, 0.92);
+    color: #fff;
+    border-left: 4px solid #2980b9;
+}
+
 /* ==================== UTILITY CLASSES ==================== */
 .hidden {
     display: none !important;

@@ -429,6 +429,19 @@ function hideLoadingOverlay() {
 // ==================== NOTIFICATIONS ====================
 function showNotification(message, type = 'info') {
   console.log(`[${type.toUpperCase()}] ${message}`);
+
+  const toast = document.getElementById('notification-toast');
+  const msg   = document.getElementById('notification-message');
+  if (!toast || !msg) return;
+
+  msg.textContent = message;
+  toast.className = `notification-toast notification-${type}`;
+
+  // Auto-dismiss after 3 seconds
+  clearTimeout(toast._dismissTimer);
+  toast._dismissTimer = setTimeout(() => {
+    toast.classList.add('hidden');
+  }, 3000);
 }
     
 // ==================== SPRINT BANNER ====================

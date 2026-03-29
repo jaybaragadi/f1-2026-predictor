@@ -323,6 +323,42 @@ def add_experience_features(df):
 
 
 # ==================== MAIN PIPELINE ====================
+def add_qualifying_form_features(df):
+    """
+    Qualifying pace features — leak-free via shift(1).
+
+    GridPosition is already in the race dataset so we can compute rolling
+    grid averages and the gap between teammates on the grid without any
+    additional data source.
+    """
+    print("\nAdding qualifying form features...")
+
+    df = df.sort_values(['DriverCode', 'Date'])
+
+    # Rolling average grid position — lower is better (pole = 1)
+    for window in [3, 5]:
+        df[f'GridPosition_Rolling_{window}'] = df.groupby('DriverCode')['GridPosition'].transform(
+            lambda x: x.rolling(window, min_periods=1).mean().shift(1)
+        )
+
+    # Teammate grid gap: driver's grid - teammate's grid at the same race.
+    # Positive = driver started behind their teammate (relative pace deficit).
+    # Computed race-by-race so no leakage.
+    teammate_grid = (
+        df.groupby(['Year', 'Circuit', 'Team'])['GridPosition']
+        .transform('mean')        # average grid of both teammates
+    )
+    df['TeamMateGridGap'] = df['GridPosition'] - teammate_grid
+
+    # Shift TeamMateGridGap so we use *previous* race's teammate gap as feature
+    df['TeamMateGridGap'] = df.groupby('DriverCode')['TeamMateGridGap'].transform(
+        lambda x: x.shift(1)
+    )
+
+    print("  Added 3 qualifying form features (GridPosition_Rolling_3/5, TeamMateGridGap) — leak-free")
+    return df
+
+
 def build_features(df):
     """Main feature engineering pipeline"""
 
@@ -370,6 +406,7 @@ def build_features(df):
     df = add_quali_race_features(df)
     df = add_championship_features(df)
     df = add_experience_features(df)
+    df = add_qualifying_form_features(df)
 
     # Fill any NaN values introduced by shift(1) on first races
     numeric_cols = df.select_dtypes(include=[np.number]).columns
@@ -426,6 +463,7 @@ def main():
     print(f"  Quali/Race: 3 (RacePaceVsQuali intermediate dropped)")
     print(f"  Championship: 4 [already shift(1) correct]")
     print(f"  Experience: 5 [shift(1) applied]")
+    print(f"  Qualifying form: 3 (GridPos rolling + teammate gap) [shift(1) applied]")
 
     print(f"\n{'='*70}\n")
 
