@@ -1,6 +1,6 @@
 """
 Flask Backend for F1 2026 Race Predictor
-CORRECTED VERSION - Fixed driver name display issue
+Dynamic feature cache — adapts automatically to any trained feature set.
 """
 
 import sys
@@ -13,7 +13,7 @@ import pandas as pd
 from flask import Flask, jsonify, request, render_template
 from flask_cors import CORS
 
-# Add parent directory to path
+# Add parent directory to path so feature_engineering imports work
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from config import (
@@ -32,10 +32,44 @@ predictor = None
 model_loaded = False
 model_metadata = {}
 
+# Feature groups used to route lookups to the right cache
+_TRACK_DRIVER_FEATS = {
+    'DriverTrackAvg', 'DriverTrackBest', 'CircuitBestPosition', 'CircuitRacesCount',
+}
+_TRACK_TEAM_FEATS = {
+    'TeamTrackAvg', 'TeamCircuitBest',
+}
+_CIRCUIT_FEATS = {
+    'CircuitAvgPosition',
+}
+_TEAM_FEATS = {
+    'TeamYearPoints', 'TeamYearAvgPosition', 'TeamRaceAvgPosition',
+    'TeamYearReliability', 'TeamYearBest', 'TeamRecentForm',
+}
+
+# Sensible defaults for features where 11.0 is wrong
+_FEATURE_DEFAULTS = {
+    'CircuitRacesCount': 0.0,
+    'CareerRaceCount':   0.0,
+    'RacesWithTeam':     0.0,
+    'CareerPodiums':     0.0,
+    'CareerWins':        0.0,
+    'CareerPoints':      0.0,
+    'ChampionshipPoints':0.0,
+    'GapToLeader':       0.0,
+    'FightingForTitle':  0.0,
+    'PointsMomentum':    1.0,
+    'WinStreak':         0.0,
+    'PodiumStreak':      0.0,
+    'PointsFinishStreak':0.0,
+    'RecentReliability': 5.0,
+    'ChampionshipPosition': 11.0,
+}
+
 
 # -------------------- Predictor --------------------
 class F1RacePredictor:
-    """Race prediction with 2026 updates and track-specific features"""
+    """Race predictor — builds features dynamically from the historical dataset."""
 
     def __init__(self):
         self.model = None
@@ -43,310 +77,263 @@ class F1RacePredictor:
         self.feature_columns = None
         self.drivers_2026 = None
         self.teams_2026 = None
-        self.training_data = None
-        self.team_stats = {}   # computed from training data at load time
+        self.feature_cache = None   # populated in load_model
 
+    # ------------------------------------------------------------------
+    # Model loading
+    # ------------------------------------------------------------------
     def load_model(self):
-        """Load trained model + reference csvs + training data"""
         try:
-            self.model = joblib.load(MODEL_DIR / "f1_race_predictor_model.pkl")
-            self.scaler = joblib.load(MODEL_DIR / "scaler.pkl")
+            self.model          = joblib.load(MODEL_DIR / "f1_race_predictor_model.pkl")
+            self.scaler         = joblib.load(MODEL_DIR / "scaler.pkl")
             self.feature_columns = joblib.load(MODEL_DIR / "feature_columns.pkl")
 
             self.drivers_2026 = pd.read_csv(REFERENCE_DATA_DIR / "2026_drivers.csv")
-            self.teams_2026 = pd.read_csv(REFERENCE_DATA_DIR / "2026_teams.csv")
-
-            # Ensure types
+            self.teams_2026   = pd.read_csv(REFERENCE_DATA_DIR / "2026_teams.csv")
             self.drivers_2026["DriverNumber"] = self.drivers_2026["DriverNumber"].astype(int)
 
-            # Load training data for track feature calculation
-            training_file = Path(__file__).parent.parent / "data" / "processed" / "f1_training_dataset.csv"
-            if training_file.exists():
-                self.training_data = pd.read_csv(training_file)
-                print(f"✓ Training data loaded ({len(self.training_data)} records)")
+            # Build the feature cache from the clean feature CSV (or raw data)
+            self.feature_cache = self._build_feature_cache()
 
-                if "DriverCode" in self.training_data.columns:
-                    unique_codes = self.training_data["DriverCode"].unique()
-                    print(f"✓ Found {len(unique_codes)} unique drivers in training data")
-
-                # Pre-compute per-team historical stats so predictions use real values
-                # instead of hardcoded constants (200, 11, 11).
-                if "Team" in self.training_data.columns and "Position" in self.training_data.columns:
-                    for team_name, grp in self.training_data.groupby("Team"):
-                        self.team_stats[team_name] = {
-                            "TeamRaceAvgPosition": float(grp["Position"].mean()),
-                            "TeamYearAvgPosition": float(grp["Position"].mean()),
-                            "TeamYearPoints": (
-                                float(grp["Points"].sum() / grp["Year"].nunique())
-                                if "Points" in grp.columns and "Year" in grp.columns
-                                else 200.0
-                            ),
-                        }
-                    print(f"✓ Team stats computed for {len(self.team_stats)} teams")
-            else:
-                self.training_data = pd.DataFrame()
-                print("⚠️  Training data not found")
-
-            print("✓ Model loaded successfully")
-            
-            # Check for track features
-            track_features = [f for f in self.feature_columns if 'Track' in f]
-            if track_features:
-                print(f"✓ Track-specific features enabled: {len(track_features)}")
-            
+            print("Model loaded successfully")
+            print(f"  Features : {len(self.feature_columns)}")
+            print(f"  Cache    : {len(self.feature_cache['driver'])} drivers, "
+                  f"{len(self.feature_cache['circuit'])} circuits")
             return True
+
         except Exception as e:
-            print(f"❌ Error loading model: {e}")
+            print(f"Error loading model: {e}")
             import traceback
             traceback.print_exc()
             return False
 
-    def _get_track_features(self, driver_code, team, race_name):
+    # ------------------------------------------------------------------
+    # Feature cache construction
+    # ------------------------------------------------------------------
+    def _build_feature_cache(self):
         """
-        Calculate track-specific features from historical data
-        ULTIMATE VERSION: Multiple fallback layers
+        Load the clean feature CSV and build fast lookup caches.
+        Falls back to building features from raw data if the CSV is absent.
         """
-        
-        if self.training_data is None or self.training_data.empty:
-            return self._get_default_track_features()
-        
-        # Layer 1: Try exact match (driver + exact race name)
-        driver_track = self.training_data[
-            (self.training_data["DriverCode"] == driver_code) &
-            (self.training_data["RaceName"] == race_name)
-        ]
-        
-        # Layer 2: Try partial race name match
-        if len(driver_track) == 0:
-            circuit_key = race_name.replace(" Grand Prix", "").strip()
-            driver_track = self.training_data[
-                (self.training_data["DriverCode"] == driver_code) &
-                (self.training_data["RaceName"].str.contains(circuit_key, case=False, na=False))
-            ]
-        
-        # Layer 3: Get driver's overall performance (any track)
-        driver_overall = self.training_data[
-            self.training_data["DriverCode"] == driver_code
-        ]
-        
-        # Layer 4: Team track data
-        team_track = self.training_data[
-            (self.training_data["Team"] == team) &
-            (self.training_data["RaceName"] == race_name)
-        ]
-        
-        if len(team_track) == 0:
-            circuit_key = race_name.replace(" Grand Prix", "").strip()
-            team_track = self.training_data[
-                (self.training_data["Team"] == team) &
-                (self.training_data["RaceName"].str.contains(circuit_key, case=False, na=False))
-            ]
-        
-        # Calculate driver features with fallbacks
-        if len(driver_track) > 0:
-            # Has track-specific history - BEST case
-            driver_avg = float(driver_track["Position"].mean())
-            driver_best = int(driver_track["Position"].min())
-            driver_races = len(driver_track)
-            driver_consistency = float(driver_track["Position"].std() if len(driver_track) >= 3 else 5.0)
-        elif len(driver_overall) > 0:
-            # No track history, but has overall history - Use career stats
-            driver_avg = float(driver_overall["Position"].mean())
-            driver_best = int(driver_overall["Position"].min())
-            driver_races = 0  # No races at THIS track
-            driver_consistency = 5.0
-        else:
-            # Completely new driver - Use neutral defaults
-            driver_avg = 11.0
-            driver_best = 20
-            driver_races = 0
-            driver_consistency = 5.0
-        
-        # Calculate team features
-        if len(team_track) > 0:
-            team_avg = float(team_track["Position"].mean())
-        else:
-            # Use team's overall average
-            team_overall = self.training_data[self.training_data["Team"] == team]
-            if len(team_overall) > 0:
-                team_avg = float(team_overall["Position"].mean())
-            else:
-                team_avg = 11.0
-        
-        return {
-            "DriverTrackAvg": driver_avg,
-            "DriverTrackBest": driver_best,
-            "DriverTrackRaces": driver_races,
-            "TeamTrackAvg": team_avg,
-            "DriverTrackConsistency": driver_consistency,
+        project_root  = Path(__file__).parent.parent
+        features_csv  = project_root / "data" / "processed" / "f1_race_features.csv"
+        raw_csv       = project_root / "data" / "raw"       / "historical_race_results.csv"
+
+        features_df = None
+
+        if features_csv.exists():
+            features_df = pd.read_csv(features_csv)
+        elif raw_csv.exists():
+            from feature_engineering.build_features import build_features
+            features_df = build_features(pd.read_csv(raw_csv))
+
+        if features_df is None or features_df.empty:
+            print("WARNING: No feature data found — using neutral defaults for all drivers")
+            return {'driver': {}, 'team': {}, 'track_driver': {}, 'track_team': {}, 'circuit': {}}
+
+        # Ensure chronological order
+        if 'Date' in features_df.columns:
+            features_df['Date'] = pd.to_datetime(features_df['Date'])
+            features_df = features_df.sort_values('Date')
+
+        circuit_col = 'Circuit' if 'Circuit' in features_df.columns else 'RaceName'
+
+        # ---------- per-driver latest row ----------
+        driver_cache = {
+            code: grp.iloc[-1].to_dict()
+            for code, grp in features_df.groupby('DriverCode')
         }
 
-    def _get_default_track_features(self):
-        """Return default track features"""
-        return {
-            "DriverTrackAvg": 11.0,
-            "DriverTrackBest": 20,
-            "DriverTrackRaces": 0,
-            "TeamTrackAvg": 11.0,
-            "DriverTrackConsistency": 5.0,
+        # ---------- per-team latest row ----------
+        team_cache = {
+            team: grp.iloc[-1].to_dict()
+            for team, grp in features_df.groupby('Team')
         }
+
+        # ---------- per-driver+circuit latest row ----------
+        track_driver_cache = {
+            (code, circuit): grp.iloc[-1].to_dict()
+            for (code, circuit), grp in features_df.groupby(['DriverCode', circuit_col])
+        }
+
+        # ---------- per-team+circuit latest row ----------
+        track_team_cache = {
+            (team, circuit): grp.iloc[-1].to_dict()
+            for (team, circuit), grp in features_df.groupby(['Team', circuit_col])
+        }
+
+        # ---------- per-circuit latest row (for CircuitAvgPosition) ----------
+        circuit_cache = {
+            circuit: grp.iloc[-1].to_dict()
+            for circuit, grp in features_df.groupby(circuit_col)
+        }
+
+        return {
+            'driver':       driver_cache,
+            'team':         team_cache,
+            'track_driver': track_driver_cache,
+            'track_team':   track_team_cache,
+            'circuit':      circuit_cache,
+            'circuit_col':  circuit_col,
+        }
+
+    # ------------------------------------------------------------------
+    # Circuit name matching
+    # ------------------------------------------------------------------
+    def _find_circuit_name(self, race_name: str):
+        """Return the circuit key used in the training data that best matches race_name."""
+        if not self.feature_cache or not self.feature_cache['circuit']:
+            return None
+
+        known = set(self.feature_cache['circuit'].keys())
+        race_lower = race_name.lower()
+
+        # 1. Exact
+        if race_name in known:
+            return race_name
+
+        # 2. Case-insensitive
+        for c in known:
+            if c.lower() == race_lower:
+                return c
+
+        # 3. Substring
+        for c in known:
+            if c.lower() in race_lower or race_lower in c.lower():
+                return c
+
+        # 4. Keyword (e.g. "Australian" in "Australian Grand Prix")
+        keywords = [w for w in race_lower.replace(' grand prix', '').split() if len(w) > 3]
+        for c in known:
+            if any(kw in c.lower() for kw in keywords):
+                return c
+
+        return None
+
+    # ------------------------------------------------------------------
+    # Feature vector construction
+    # ------------------------------------------------------------------
+    def _get_cached(self, cache_dict, key, feature):
+        """Safe feature lookup from a cache dict with NaN guard."""
+        row = cache_dict.get(key, {})
+        val = row.get(feature)
+        if val is None or (isinstance(val, float) and np.isnan(val)):
+            return None
+        return float(val)
 
     def prepare_features(self, grid_positions_by_number, race_info):
         """
-        Prepare feature vectors for prediction
-        ULTIMATE VERSION: All 30 ML features
+        Build one feature row per driver using the historical feature cache.
+        Works with any model feature set — no hardcoded feature list.
         """
         rows = []
-        race_name = race_info.get("name", "")
-        
+        race_name    = race_info.get("name", "")
+        circuit_name = self._find_circuit_name(race_name)
+
         for driver_num, grid_pos in grid_positions_by_number.items():
             driver_num_int = int(driver_num)
 
             driver_df = self.drivers_2026[self.drivers_2026["DriverNumber"] == driver_num_int]
             if driver_df.empty:
-                raise ValueError(f"Driver number {driver_num_int} not found")
+                raise ValueError(f"Driver number {driver_num_int} not found in 2026 drivers")
 
-            driver = driver_df.iloc[0]
+            driver      = driver_df.iloc[0]
             driver_code = driver["DriverCode"]
             driver_team = driver["Team"]
 
             if self.teams_2026[self.teams_2026["Team"] == driver_team].empty:
                 raise ValueError(f"Team '{driver_team}' not found")
 
-            # Get track-specific features
-            track_features = self._get_track_features(driver_code, driver_team, race_name)
+            row = {}
 
-            # Get driver's historical performance - COMPREHENSIVE
-            driver_historical = pd.DataFrame()
-            if self.training_data is not None and not self.training_data.empty:
-                # Try exact DriverCode match
-                driver_historical = self.training_data[
-                    self.training_data["DriverCode"] == driver_code
-                ]
-                
-                # If no match, try DriverName match (in case codes differ)
-                if len(driver_historical) == 0 and "DriverName" in self.training_data.columns:
-                    driver_name = driver.get("DriverName", driver.get("name", ""))
-                    driver_historical = self.training_data[
-                        self.training_data["DriverName"] == driver_name
-                    ]
+            for feat in self.feature_columns:
+                val = None
 
-            # Calculate stats with proper fallbacks
-            if len(driver_historical) > 0:
-                driver_avg_pos = float(driver_historical["Position"].mean())
-                driver_best_pos = float(driver_historical["Position"].min())
-                
-                if "Points" in driver_historical.columns:
-                    driver_avg_pts = float(driver_historical["Points"].mean())
-                    driver_total_pts = float(driver_historical["Points"].sum())
-                else:
-                    driver_avg_pts = 0.0
-                    driver_total_pts = 0.0
-            else:
-                # New driver or no data - use intelligent defaults based on grid position
-                if grid_pos <= 5:
-                    driver_avg_pos = 5.0  # Assume frontrunner
-                    driver_best_pos = 1.0
-                    driver_total_pts = 100.0
-                elif grid_pos <= 10:
-                    driver_avg_pos = 8.0  # Assume midfield
-                    driver_best_pos = 5.0
-                    driver_total_pts = 50.0
-                else:
-                    driver_avg_pos = 14.0  # Assume backmarker
-                    driver_best_pos = 10.0
-                    driver_total_pts = 10.0
-                driver_avg_pts = driver_total_pts / 20.0
+                if feat == 'GridPosition':
+                    val = float(grid_pos)
 
-            # Build complete feature row - ALL 30 FEATURES
-            row = {
-                # Grid/Qualifying (2 features)
-                "GridPosition": float(grid_pos),
-                "QualifyingPosition": float(grid_pos),
-                
-                # Driver rolling stats (11 features)
-                "Position_Rolling_3": driver_avg_pos,
-                "Position_Rolling_5": driver_avg_pos,
-                "Position_Rolling_10": driver_avg_pos,
-                "GridPosition_Rolling_3": float(grid_pos),
-                "GridPosition_Rolling_5": float(grid_pos),
-                "Points_Rolling_3": driver_avg_pts,
-                "Points_Rolling_5": driver_avg_pts,
-                "PositionsGained_Rolling_3": 0.0,
-                "PositionsGained_Rolling_5": 0.0,
-                "RecentForm": driver_avg_pos,
-                
-                # Driver historical stats (4 features)
-                "AvgFinishPosition": driver_avg_pos,
-                "AvgGridPosition": float(grid_pos),
-                "TotalPoints": driver_total_pts,
-                "BestFinish": driver_best_pos,
-                
-                # Team features (5 features) — from historical training data per team
-                "TeamYearPoints": self.team_stats.get(driver_team, {}).get("TeamYearPoints", 200.0),
-                "TeamYearAvgPosition": self.team_stats.get(driver_team, {}).get("TeamYearAvgPosition", 11.0),
-                "TeamRaceAvgPosition": self.team_stats.get(driver_team, {}).get("TeamRaceAvgPosition", 11.0),
-                "ChampionshipsWon": float(driver.get("championships", 0)),
-                "YearsInF1": 10.0,
-                
-                # Circuit features (3 features)
-                "CircuitAvgPosition": 11.0,
-                "CircuitBestPosition": 6.0,
-                "CircuitRacesCount": 3.0,
-                
-                # Track-specific features (5 features)
-                "DriverTrackAvg": track_features["DriverTrackAvg"],
-                "DriverTrackBest": track_features["DriverTrackBest"],
-                "DriverTrackRaces": track_features["DriverTrackRaces"],
-                "TeamTrackAvg": track_features["TeamTrackAvg"],
-                "DriverTrackConsistency": track_features["DriverTrackConsistency"],
-                
-                # Recency weight (1 feature)
-                "RecencyWeight": 2.0,
-                
-                # Metadata (for results) - CORRECTED FIELD NAMES
-                "DriverNumber": driver_num_int,
-                "DriverName": driver.get("DriverName", driver.get("name", "Unknown Driver")),
-                "DriverCode": driver_code,
-                "Team": driver_team,
-            }
+                # --- Circuit + driver features ---
+                elif feat in _TRACK_DRIVER_FEATS and circuit_name:
+                    val = self._get_cached(
+                        self.feature_cache['track_driver'],
+                        (driver_code, circuit_name), feat
+                    )
+
+                # --- Circuit + team features ---
+                elif feat in _TRACK_TEAM_FEATS and circuit_name:
+                    val = self._get_cached(
+                        self.feature_cache['track_team'],
+                        (driver_team, circuit_name), feat
+                    )
+
+                # --- Circuit-wide features ---
+                elif feat in _CIRCUIT_FEATS and circuit_name:
+                    val = self._get_cached(
+                        self.feature_cache['circuit'],
+                        circuit_name, feat
+                    )
+
+                # --- Team-wide features ---
+                elif feat in _TEAM_FEATS:
+                    val = self._get_cached(
+                        self.feature_cache['team'],
+                        driver_team, feat
+                    )
+
+                # --- Everything else: driver's latest historical value ---
+                if val is None:
+                    val = self._get_cached(
+                        self.feature_cache['driver'],
+                        driver_code, feat
+                    )
+
+                # --- Final fallback: feature-specific sensible default ---
+                if val is None:
+                    val = _FEATURE_DEFAULTS.get(feat, 11.0)
+
+                row[feat] = val
+
+            # Metadata carried alongside features (not used by model)
+            row['DriverNumber'] = driver_num_int
+            row['DriverName']   = driver.get("DriverName", str(driver_num_int))
+            row['DriverCode']   = driver_code
+            row['Team']         = driver_team
+
             rows.append(row)
 
         return pd.DataFrame(rows)
 
+    # ------------------------------------------------------------------
+    # Prediction
+    # ------------------------------------------------------------------
     def predict(self, grid_positions_by_number, race_info):
-        """Return predictions using full ML model"""
         features_df = self.prepare_features(grid_positions_by_number, race_info)
-        
-        # Select only the features the model expects
+
         X = features_df[self.feature_columns]
-        # Keep as DataFrame so sub-models (Ridge/Lasso/etc.) retain feature names
+        # Preserve DataFrame so sub-models keep feature names (no sklearn warnings)
         X_scaled = pd.DataFrame(
             self.scaler.transform(X),
             columns=self.feature_columns,
             index=X.index,
         )
 
-        # Make predictions using 5-algorithm ensemble
         preds = self.model.predict(X_scaled)
         preds = np.clip(preds, 1, 22)
 
-        # Sort by predicted position
         features_df["PredictedPosition"] = preds
         features_df = features_df.sort_values("PredictedPosition")
 
-        # Format results
         results = []
         for idx, (_, row) in enumerate(features_df.iterrows(), 1):
             results.append({
-                "position": idx,
+                "position":           idx,
                 "predicted_position": float(row["PredictedPosition"]),
-                "driver_number": int(row["DriverNumber"]),
-                "driver_code": row["DriverCode"],
-                "driver_name": row["DriverName"],  # This should now work correctly
-                "team": row["Team"],
-                "grid_position": int(row["GridPosition"]),
-                "position_change": int(row["GridPosition"]) - idx,
+                "driver_number":      int(row["DriverNumber"]),
+                "driver_code":        row["DriverCode"],
+                "driver_name":        row["DriverName"],
+                "team":               row["Team"],
+                "grid_position":      int(row["GridPosition"]),
+                "position_change":    int(row["GridPosition"]) - idx,
             })
         return results
 
@@ -356,35 +343,44 @@ def init_predictor():
     global predictor, model_loaded, model_metadata
 
     print("\n" + "=" * 70)
-    print("🏎️  F1 2026 RACE PREDICTOR - FLASK SERVER")
+    print("F1 2026 RACE PREDICTOR - FLASK SERVER")
     print("=" * 70)
 
-    predictor = F1RacePredictor()
+    predictor    = F1RacePredictor()
     model_loaded = predictor.load_model()
 
     if model_loaded:
+        # Read accuracy from metadata file if available
+        meta_file = MODEL_DIR / "model_metadata.json"
+        saved_accuracy = "83.9%"
+        if meta_file.exists():
+            import json
+            try:
+                with open(meta_file) as f:
+                    saved_meta = json.load(f)
+                saved_accuracy = saved_meta.get("test_accuracy", saved_accuracy)
+            except Exception:
+                pass
+
         model_metadata = {
-            "features": len(predictor.feature_columns),
-            "drivers": 22,
-            "teams": 11,
-            "races": len(RACES_2026),
-            "season": 2026,
+            "features":           len(predictor.feature_columns),
+            "drivers":            22,
+            "teams":              11,
+            "races":              len(RACES_2026),
+            "season":             2026,
             "defending_champion": "Lando Norris (#1)",
-            "track_aware": any('Track' in f for f in predictor.feature_columns),
-            "accuracy": "83.9%",
-            "model_type": "5-Algorithm Ensemble",
+            "track_aware":        any('Track' in f or 'Circuit' in f
+                                      for f in predictor.feature_columns),
+            "accuracy":           saved_accuracy,
+            "model_type":         "5-Algorithm Ensemble",
         }
-        print("\nModel Status: ✓ FULL ML MODEL LOADED")
-        print(f"Features: {model_metadata['features']}")
-        print(f"Accuracy: {model_metadata['accuracy']} (within ±2 positions)")
-        print(f"Model: {model_metadata['model_type']}")
-        print(f"Track-aware: {'Yes' if model_metadata['track_aware'] else 'No'}")
-        print("Drivers: 22 (11 teams)")
-        print(f"Races: {len(RACES_2026)}")
-        print("Champion: Lando Norris (#1)")
+        print(f"\nModel Status  : LOADED")
+        print(f"Features      : {model_metadata['features']}")
+        print(f"Accuracy      : {model_metadata['accuracy']} (within +/-2 positions)")
+        print(f"Track-aware   : {'Yes' if model_metadata['track_aware'] else 'No'}")
         print("=" * 70 + "\n")
     else:
-        print("\n❌ Model failed to load\n")
+        print("\nModel failed to load\n")
 
 
 def race_by_name(race_name: str):
@@ -418,13 +414,11 @@ def get_model_info():
 
 @app.route("/api/races", methods=["GET"])
 def get_races():
-    """Return array of races"""
     races_with_status = []
     today = datetime.now().date()
 
     for race in RACES_2026:
         race_date = datetime.strptime(race["date"], "%Y-%m-%d").date()
-        
         if race_date < today:
             status = "completed"
         elif race_date == today:
@@ -434,11 +428,12 @@ def get_races():
 
         races_with_status.append({
             **race,
-            "status": status,
+            "status":         status,
             "formatted_date": race_date.strftime("%b %d, %Y"),
-            "full_date": race_date.strftime("%B %d, %Y"),
-            "has_sprint": bool(race.get("has_sprint", False)),
-            "is_sprint_race": bool(race.get("is_sprint_race", False)) or (str(race.get("format", "")).lower() == "sprint"),
+            "full_date":      race_date.strftime("%B %d, %Y"),
+            "has_sprint":     bool(race.get("has_sprint", False)),
+            "is_sprint_race": bool(race.get("is_sprint_race", False))
+                              or str(race.get("format", "")).lower() == "sprint",
         })
 
     return jsonify(races_with_status)
@@ -446,7 +441,6 @@ def get_races():
 
 @app.route("/api/drivers", methods=["GET"])
 def get_drivers():
-    """Return array of drivers"""
     return jsonify(DRIVERS_2026)
 
 
@@ -457,17 +451,13 @@ def get_teams():
 
 @app.route("/api/default-grid", methods=["GET"])
 def get_default_grid():
-    """Return default grid keyed by DRIVER CODE"""
+    """Return a default grid keyed by driver code, ordered by championship pedigree."""
     sorted_drivers = sorted(
         DRIVERS_2026,
-        key=lambda x: (x.get("championships", 0), x.get("experience", 0) if "experience" in x else 0),
+        key=lambda x: (x.get("championships", 0), x.get("experience", 0)),
         reverse=True,
     )
-
-    grid_positions = {}
-    for idx, driver in enumerate(sorted_drivers, 1):
-        grid_positions[driver["code"]] = idx
-
+    grid_positions = {d["code"]: idx for idx, d in enumerate(sorted_drivers, 1)}
     return jsonify({"status": "success", "grid_positions": grid_positions})
 
 
@@ -481,7 +471,6 @@ def predict_race():
 
         race_name = data.get("race")
         race_info = race_by_name(race_name)
-
         if not race_info:
             return jsonify({"status": "error", "message": "Invalid race name"}), 400
 
@@ -489,52 +478,49 @@ def predict_race():
         if not isinstance(grid_positions, dict) or len(grid_positions) == 0:
             return jsonify({"status": "error", "message": "grid_positions missing"}), 400
 
-        code_to_num = build_code_to_number_map()
+        code_to_num  = build_code_to_number_map()
         num_to_driver = build_number_to_driver_map()
 
-        grid_positions_by_number = {}
+        grid_by_number = {}
         for code, pos in grid_positions.items():
             if code not in code_to_num:
-                return jsonify({"status": "error", "message": f"Unknown driver code: {code}"}), 400
-            driver_num = code_to_num[code]
-            grid_positions_by_number[str(driver_num)] = int(pos)
+                return jsonify({"status": "error",
+                                "message": f"Unknown driver code: {code}"}), 400
+            grid_by_number[str(code_to_num[code])] = int(pos)
 
-        if len(grid_positions_by_number) != 22:
-            return jsonify({
-                "status": "error", 
-                "message": f"Expected 22 drivers, got {len(grid_positions_by_number)}"
-            }), 400
+        if len(grid_by_number) != 22:
+            return jsonify({"status": "error",
+                            "message": f"Expected 22 drivers, got {len(grid_by_number)}"}), 400
 
-        positions = list(grid_positions_by_number.values())
+        positions = list(grid_by_number.values())
         if len(set(positions)) != len(positions):
             return jsonify({"status": "error", "message": "Duplicate grid positions"}), 400
-
         if not all(1 <= p <= 22 for p in positions):
-            return jsonify({"status": "error", "message": "Grid positions must be 1-22"}), 400
+            return jsonify({"status": "error",
+                            "message": "Grid positions must be 1-22"}), 400
 
-        raw_predictions = predictor.predict(grid_positions_by_number, race_info)
+        raw_preds = predictor.predict(grid_by_number, race_info)
 
         predictions = []
-        for p in raw_predictions:
+        for p in raw_preds:
             driver_num = p["driver_number"]
             d = num_to_driver.get(driver_num, {})
-
             predictions.append({
-                "position": p["position"],
+                "position":        p["position"],
                 "predictedPosition": p["predicted_position"],
-                "driverNumber": driver_num,
-                "driverCode": p.get("driver_code", d.get("code")),
-                "driverName": p["driver_name"],  # Should now show correct driver names
-                "team": p["team"],
-                "gridPosition": p["grid_position"],
+                "driverNumber":    driver_num,
+                "driverCode":      p.get("driver_code", d.get("code")),
+                "driverName":      p["driver_name"],
+                "team":            p["team"],
+                "gridPosition":    p["grid_position"],
                 "positionsGained": p["position_change"],
             })
 
         return jsonify({
-            "status": "success", 
-            "race": race_info["name"], 
-            "race_info": race_info, 
-            "predictions": predictions
+            "status":     "success",
+            "race":       race_info["name"],
+            "race_info":  race_info,
+            "predictions": predictions,
         })
 
     except Exception as e:
@@ -547,9 +533,9 @@ def predict_race():
 @app.route("/health", methods=["GET"])
 def health_check():
     return jsonify({
-        "status": "healthy", 
-        "model_loaded": model_loaded, 
-        "timestamp": datetime.now().isoformat()
+        "status":       "healthy",
+        "model_loaded": model_loaded,
+        "timestamp":    datetime.now().isoformat(),
     })
 
 

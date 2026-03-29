@@ -30,9 +30,9 @@ jobs:
       
       - name: Run auto-retrain
         run: |
-          python auto_retrain.py
+          python auto_retrain.py --auto
         continue-on-error: true
-      
+
       - name: Check for model updates
         id: check_updates
         run: |
@@ -41,21 +41,21 @@ jobs:
           else
             echo "updated=true" >> $GITHUB_OUTPUT
           fi
-      
+
       - name: Commit and push if updated
         if: steps.check_updates.outputs.updated == 'true'
         run: |
           git config --global user.name 'F1 Auto-Retrain Bot'
           git config --global user.email 'bot@f1predictor.com'
-          git add .
+          git add model/saved_models/ data/processed/f1_race_features.csv data/raw/historical_race_results.csv
           git commit -m "Auto-retrain: Updated model after race data collection"
           git push
-      
+
       - name: Summary
         run: |
           if [ "${{ steps.check_updates.outputs.updated }}" == "true" ]; then
-            echo "✅ Model updated and pushed to repository"
+            echo "Model updated and pushed to repository"
             echo "Render will auto-deploy the updated model"
           else
-            echo "ℹ️ No new race data found - model unchanged"
+            echo "No new race data found - model unchanged"
           fi

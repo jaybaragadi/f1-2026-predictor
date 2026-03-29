@@ -54,30 +54,66 @@ from sklearn.preprocessing import StandardScaler
 # ---------------------------------------------------------------------------
 
 def collect_latest_race_data(season: int, round_num: int) -> pd.DataFrame:
-    """Fetch race results for a given season/round via FastF1."""
+    """Fetch race results for a given season/round via FastF1 and append to historical CSV."""
+
+    # Build lookup maps from config so team names match the training data
+    driver_team_map   = {d['code']: d['team'] for d in DRIVERS_2026}
+    driver_name_map   = {d['code']: d['name'] for d in DRIVERS_2026}
+    driver_number_map = {d['code']: d['number'] for d in DRIVERS_2026}
+    race_info = next((r for r in RACES_2026 if r['round'] == round_num), None)
+    race_name = race_info['name'] if race_info else f'2026 Round {round_num}'
+
     cache_dir = project_root / 'data' / 'raw' / str(season) / 'cache'
     cache_dir.mkdir(parents=True, exist_ok=True)
     fastf1.Cache.enable_cache(str(cache_dir))
 
     session = fastf1.get_session(season, round_num, 'R')
     session.load()
+
     results = session.results[['Abbreviation', 'Position', 'GridPosition', 'Points', 'Status']].copy()
     results.rename(columns={'Abbreviation': 'DriverCode'}, inplace=True)
-    results['Year'] = season
-    results['Round'] = round_num
-    results['RaceName'] = session.event['EventName']
-    results['Circuit'] = session.event['Location']
-    results['Date'] = str(session.event['EventDate'])
-    return results
+
+    results['Year']         = season
+    results['Round']        = round_num
+    results['RaceName']     = race_name
+    results['DriverName']   = results['DriverCode'].map(driver_name_map).fillna('Unknown')
+    results['Team']         = results['DriverCode'].map(driver_team_map).fillna('Unknown')
+    results['DriverNumber'] = results['DriverCode'].map(driver_number_map)
+
+    new_rows = results[['Year', 'RaceName', 'Round', 'DriverNumber', 'DriverCode',
+                         'DriverName', 'Team', 'GridPosition', 'Position', 'Points', 'Status']].copy()
+
+    # Append to historical CSV (skip if already present to allow re-runs safely)
+    raw_csv = project_root / 'data' / 'raw' / 'historical_race_results.csv'
+    if raw_csv.exists():
+        existing = pd.read_csv(raw_csv)
+        already_exists = ((existing['Year'] == season) & (existing['Round'] == round_num)).any()
+        if already_exists:
+            print(f"  Data for {season} Round {round_num} already in historical CSV — skipping append")
+        else:
+            combined = pd.concat([existing, new_rows], ignore_index=True)
+            combined.to_csv(raw_csv, index=False)
+            print(f"  Appended {len(new_rows)} rows to {raw_csv.name}")
+    else:
+        new_rows.to_csv(raw_csv, index=False)
+        print(f"  Created {raw_csv.name} with {len(new_rows)} rows")
+
+    return new_rows
 
 
 def build_features_for_season(season: int, include_historical: bool = True) -> pd.DataFrame:
-    """Rebuild the feature dataset and return the processed DataFrame."""
-    data_file = TrainConfig.POSSIBLE_DATA_FILES[0]  # f1_training_dataset.csv
-    if not data_file.exists():
-        raise FileNotFoundError(f"Training data not found: {data_file}")
-    raw_df = pd.read_csv(data_file)
-    return build_features(raw_df)
+    """Rebuild the feature dataset from the raw historical CSV and save it."""
+    raw_csv = project_root / 'data' / 'raw' / 'historical_race_results.csv'
+    if not raw_csv.exists():
+        raise FileNotFoundError(f"Raw data not found: {raw_csv}")
+    raw_df = pd.read_csv(raw_csv)
+    features_df = build_features(raw_df)
+    if features_df is not None:
+        out_path = project_root / 'data' / 'processed' / 'f1_race_features.csv'
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        features_df.to_csv(out_path, index=False)
+        print(f"  Saved {len(features_df)} feature rows to {out_path.name}")
+    return features_df
 
 
 def train_f1_model(features_df: pd.DataFrame, return_model: bool = False):
@@ -576,43 +612,51 @@ def retrain_after_race(round_num, diagnostics=None, results_manager=None):
 def main():
     parser = argparse.ArgumentParser(description='Enhanced auto-retrain for F1 predictor')
     parser.add_argument('--round', type=int, help='Specific round number to retrain after (1-24)')
-    parser.add_argument('--all', action='store_true', help='Retrain after all available 2026 races')
+    parser.add_argument('--all', action='store_true', help='Retrain after all completed 2026 races in order')
+    parser.add_argument('--auto', action='store_true', help='Auto-detect the latest completed race and retrain (for CI/cron)')
     parser.add_argument('--diagnostics-only', action='store_true', help='Run diagnostics on current model without retraining')
-    
+
     args = parser.parse_args()
-    
+
     # Initialize managers
     diagnostics = ModelDiagnostics()
     results_manager = RaceResultsManager()
-    
+
     if args.diagnostics_only:
         print("Running diagnostics on current model...")
-        # Load current model and run diagnostics
-        # Implementation would load saved model and run analysis
         print("Not yet implemented - use with --round to retrain")
         return
-    
-    if args.all:
-        print("Scanning for all available 2026 races...")
-        # Find all available races and retrain
-        for round_num in range(1, 25):
-            # Check if race data exists
-            race_file = project_root / 'data' / 'raw' / f'2026_round_{round_num:02d}_race.csv'
-            if race_file.exists():
-                print(f"\nFound data for Round {round_num}")
-                retrain_after_race(round_num, diagnostics, results_manager)
-            else:
-                print(f"\nNo data found for Round {round_num}, stopping scan")
-                break
-    
+
+    if args.auto:
+        # Find the latest race whose scheduled date has already passed
+        today = datetime.now().date()
+        completed = [r for r in RACES_2026 if datetime.strptime(r['date'], '%Y-%m-%d').date() < today]
+        if not completed:
+            print("No 2026 races have been completed yet based on today's date.")
+            return
+        latest = completed[-1]
+        print(f"Auto-detected latest completed race: Round {latest['round']} — {latest['name']} ({latest['date']})")
+        retrain_after_race(latest['round'], diagnostics, results_manager)
+
+    elif args.all:
+        # Retrain after every completed race in chronological order
+        today = datetime.now().date()
+        completed = [r for r in RACES_2026 if datetime.strptime(r['date'], '%Y-%m-%d').date() < today]
+        if not completed:
+            print("No 2026 races have been completed yet.")
+            return
+        print(f"Retraining after {len(completed)} completed races...")
+        for race in completed:
+            retrain_after_race(race['round'], diagnostics, results_manager)
+
     elif args.round:
         if 1 <= args.round <= 24:
             retrain_after_race(args.round, diagnostics, results_manager)
         else:
             print("Error: Round must be between 1 and 24")
-    
+
     else:
-        print("Error: Specify --round N or --all")
+        print("Error: Specify --round N, --auto, or --all")
         parser.print_help()
 
 

@@ -45,11 +45,11 @@ class Config:
     MODEL_DIR = SCRIPT_DIR / 'saved_models'
     RESULTS_DIR = SCRIPT_DIR / 'training_results'
     
-    # Training data (try multiple names for compatibility)
+    # Training data — prefer the clean leak-free feature CSV first
     POSSIBLE_DATA_FILES = [
+        PROCESSED_DIR / 'f1_race_features.csv',       # built by build_features.py (canonical)
         PROCESSED_DIR / 'f1_training_dataset.csv',
         PROCESSED_DIR / 'race_results_with_features.csv',
-        PROCESSED_DIR / 'f1_race_features.csv'
     ]
     
     # Model settings
@@ -109,10 +109,14 @@ def prepare_features(df):
     # Target
     target = 'Position'
     
-    # Columns to exclude (auto-detect)
-    # RacePaceVsQuali = Position / (GridPosition+1) uses the race result directly — leaky
+    # Columns to exclude — IDs, targets, and raw leaky values
+    # 'Points'           — per-race points earned (directly reveals finishing position)
+    # 'PositionsGained'  — GridPosition minus Position (uses target)
+    # 'DriverNumber'     — identifier, not a predictive feature
+    # 'RacePaceVsQuali'  — Position / (GridPosition+1), uses target
     exclude_cols = [
-        target, 'DriverCode', 'Team', 'TeamName', 'Circuit',
+        target, 'Points', 'PositionsGained', 'DriverNumber',
+        'DriverCode', 'Team', 'TeamName', 'Circuit',
         'Date', 'RaceName', 'Year', 'Round', 'Season', 'Status',
         'Driver', 'DriverName', 'RacePaceVsQuali',
     ]
