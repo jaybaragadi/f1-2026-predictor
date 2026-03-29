@@ -31,7 +31,7 @@ YEAR_WEIGHTS = {
 # Add this after YEAR_WEIGHTS:
 MIN_RACES_FOR_AVG = 3
 RETRAIN_AFTER_RACES = 1
-SECRET_KEY = 'f1-2026-predictor'
+SECRET_KEY = os.getenv('SECRET_KEY', 'f1-2026-predictor-dev')
 HOST = '0.0.0.0'
 PORT = int(os.getenv('PORT', 8080))
 CORS_ORIGINS = ['*']

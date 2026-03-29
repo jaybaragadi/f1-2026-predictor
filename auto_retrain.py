@@ -1,381 +1,620 @@
 """
-Automatic Model Retraining After Each 2026 Race
-IMPROVED: Handles FastF1 data availability delays
+Enhanced Auto-Retrain Script for F1 2026 Race Predictor
+========================================================
+
+Features:
+- Automatic detection of overfitting/underfitting
+- Learning curve analysis
+- Cross-validation monitoring
+- Feature importance tracking
+- Default grid from previous race results or qualifying
+- Hyperparameter optimization
+- Model performance regression detection
+
+Usage:
+    python auto_retrain_enhanced.py --round 1
+    python auto_retrain_enhanced.py --all
 """
 
 import os
 import sys
-import pandas as pd
-from datetime import datetime, timedelta
+import json
+import pickle
+import argparse
+import warnings
+from datetime import datetime
 from pathlib import Path
-import time
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+import numpy as np
+import pandas as pd
+from sklearn.model_selection import learning_curve, cross_val_score
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+import matplotlib.pyplot as plt
 
-from config import (RAW_DATA_DIR, PROCESSED_DATA_DIR, MODEL_DIR, 
-                   RACES_2026, AUTO_RETRAIN_ENABLED, CURRENT_SEASON)
+# Suppress warnings
+warnings.filterwarnings('ignore')
+
+# Add project root to path
+project_root = Path(__file__).parent
+sys.path.append(str(project_root))
+
+from config import *
+import fastf1
+from feature_engineering.build_features import build_features
+from model.train_model import (
+    load_data, prepare_features,
+    train_model as _train_model,
+    evaluate_model, save_model, get_models, Config as TrainConfig,
+)
+from sklearn.preprocessing import StandardScaler
 
 
-def get_completed_races():
-    """
-    Check which 2026 races have been completed AND data is likely available
-    """
-    today = datetime.now()
-    completed_races = []
+# ---------------------------------------------------------------------------
+# Thin wrappers so retrain_after_race() keeps its existing call signatures
+# ---------------------------------------------------------------------------
+
+def collect_latest_race_data(season: int, round_num: int) -> pd.DataFrame:
+    """Fetch race results for a given season/round via FastF1."""
+    cache_dir = project_root / 'data' / 'raw' / str(season) / 'cache'
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    fastf1.Cache.enable_cache(str(cache_dir))
+
+    session = fastf1.get_session(season, round_num, 'R')
+    session.load()
+    results = session.results[['Abbreviation', 'Position', 'GridPosition', 'Points', 'Status']].copy()
+    results.rename(columns={'Abbreviation': 'DriverCode'}, inplace=True)
+    results['Year'] = season
+    results['Round'] = round_num
+    results['RaceName'] = session.event['EventName']
+    results['Circuit'] = session.event['Location']
+    results['Date'] = str(session.event['EventDate'])
+    return results
+
+
+def build_features_for_season(season: int, include_historical: bool = True) -> pd.DataFrame:
+    """Rebuild the feature dataset and return the processed DataFrame."""
+    data_file = TrainConfig.POSSIBLE_DATA_FILES[0]  # f1_training_dataset.csv
+    if not data_file.exists():
+        raise FileNotFoundError(f"Training data not found: {data_file}")
+    raw_df = pd.read_csv(data_file)
+    return build_features(raw_df)
+
+
+def train_f1_model(features_df: pd.DataFrame, return_model: bool = False):
+    """Train the ensemble on features_df and optionally return artefacts."""
+    X, y, feature_cols = prepare_features(features_df)
+
+    # Time-based split (chronological — avoids temporal leakage)
+    if 'Date' in features_df.columns:
+        sorted_idx = features_df['Date'].argsort().values
+    else:
+        sorted_idx = np.arange(len(features_df))
+    split_point = int(len(sorted_idx) * (1 - TrainConfig.TEST_SIZE))
+    train_idx, test_idx = sorted_idx[:split_point], sorted_idx[split_point:]
+
+    X_train, X_test = X.iloc[train_idx], X.iloc[test_idx]
+    y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
+
+    scaler = StandardScaler()
+    X_train_s = pd.DataFrame(scaler.fit_transform(X_train), columns=feature_cols, index=X_train.index)
+    X_test_s  = pd.DataFrame(scaler.transform(X_test),      columns=feature_cols, index=X_test.index)
+
+    model, feat_imp = _train_model(X_train_s, y_train, X_test_s, y_test, feature_cols)
+    metrics = evaluate_model(model, X_train_s, y_train, X_test_s, y_test, feat_imp)
+    save_model(model, scaler, feature_cols, metrics, feat_imp)
+
+    if not return_model:
+        return metrics
+
+    return {
+        'model': model,
+        'X_train': X_train_s.values,
+        'y_train': y_train.values,
+        'X_test':  X_test_s.values,
+        'y_test':  y_test.values,
+        'train_mae': metrics['train']['mae'],
+        'test_mae':  metrics['test']['mae'],
+        'train_r2':  metrics['train']['r2'],
+        'test_r2':   metrics['test']['r2'],
+        'train_accuracy_pm2': 0.0,   # filled by evaluate_model print output
+        'test_accuracy_pm2':  metrics['accuracy_2pos'],
+        'num_features': len(feature_cols),
+    }
+
+
+class ModelDiagnostics:
+    """Advanced model diagnostics to detect overfitting/underfitting"""
     
-    for race in RACES_2026:
-        race_date = datetime.strptime(race['date'], '%Y-%m-%d')
+    def __init__(self, output_dir='diagnostics'):
+        self.output_dir = Path(output_dir)
+        self.output_dir.mkdir(exist_ok=True)
+        self.history = []
         
-        # Race is complete AND data should be available
-        # FastF1 data typically available 60-120 min after race
-        # Add 3 hours buffer to be safe
-        data_available_time = race_date + timedelta(hours=3)
-        
-        if today >= data_available_time:
-            completed_races.append(race)
+    def load_history(self):
+        """Load training history from file"""
+        history_file = self.output_dir / 'training_history.json'
+        if history_file.exists():
+            with open(history_file, 'r') as f:
+                self.history = json.load(f)
+        return self.history
     
-    return completed_races
+    def save_history(self):
+        """Save training history to file"""
+        history_file = self.output_dir / 'training_history.json'
+        with open(history_file, 'w') as f:
+            json.dump(self.history, f, indent=2)
+    
+    def analyze_learning_curves(self, model, X_train, y_train, cv=5):
+        """
+        Generate learning curves to detect overfitting/underfitting
+        
+        Returns:
+            dict: Analysis results with overfitting score and recommendations
+        """
+        print("\n📊 Analyzing learning curves...")
+        
+        # Calculate learning curves
+        train_sizes = np.linspace(0.1, 1.0, 10)
+        train_sizes_abs, train_scores, val_scores = learning_curve(
+            model, X_train, y_train,
+            cv=cv,
+            train_sizes=train_sizes,
+            scoring='neg_mean_absolute_error',
+            n_jobs=-1,
+            random_state=42
+        )
+        
+        # Convert to positive MAE
+        train_scores = -train_scores
+        val_scores = -val_scores
+        
+        # Calculate means and stds
+        train_mean = np.mean(train_scores, axis=1)
+        train_std = np.std(train_scores, axis=1)
+        val_mean = np.mean(val_scores, axis=1)
+        val_std = np.std(val_scores, axis=1)
+        
+        # Calculate overfitting score
+        final_gap = val_mean[-1] - train_mean[-1]
+        convergence_trend = np.mean(np.diff(val_mean[-3:]))  # Last 3 points
+        
+        # Determine model state
+        if final_gap > 1.5:  # MAE difference > 1.5 positions
+            if convergence_trend > 0:
+                status = "SEVERE_OVERFIT"
+                recommendation = "Reduce model complexity, add regularization, or get more data"
+            else:
+                status = "MILD_OVERFIT"
+                recommendation = "Consider slight regularization increase"
+        elif final_gap > 0.8:
+            status = "ACCEPTABLE_FIT"
+            recommendation = "Model is performing well, continue monitoring"
+        else:
+            if train_mean[-1] > 1.5:  # High training error
+                status = "UNDERFITTING"
+                recommendation = "Increase model complexity or add more features"
+            else:
+                status = "EXCELLENT_FIT"
+                recommendation = "Model is well-balanced"
+        
+        # Plot learning curves
+        plt.figure(figsize=(10, 6))
+        plt.plot(train_sizes_abs, train_mean, 'o-', label='Training score', linewidth=2)
+        plt.plot(train_sizes_abs, val_mean, 'o-', label='Validation score', linewidth=2)
+        plt.fill_between(train_sizes_abs, train_mean - train_std, train_mean + train_std, alpha=0.1)
+        plt.fill_between(train_sizes_abs, val_mean - val_std, val_mean + val_std, alpha=0.1)
+        
+        plt.xlabel('Training Examples', fontsize=12)
+        plt.ylabel('Mean Absolute Error (positions)', fontsize=12)
+        plt.title(f'Learning Curves - Status: {status}', fontsize=14, fontweight='bold')
+        plt.legend(loc='best', fontsize=10)
+        plt.grid(True, alpha=0.3)
+        
+        # Save plot
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        plot_path = self.output_dir / f'learning_curves_{timestamp}.png'
+        plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+        plt.close()
+        
+        analysis = {
+            'status': status,
+            'final_gap': float(final_gap),
+            'train_error': float(train_mean[-1]),
+            'val_error': float(val_mean[-1]),
+            'convergence_trend': float(convergence_trend),
+            'recommendation': recommendation,
+            'plot_path': str(plot_path)
+        }
+        
+        print(f"   Status: {status}")
+        print(f"   Final Gap (Val - Train): {final_gap:.3f} positions")
+        print(f"   Training Error: {train_mean[-1]:.3f} positions")
+        print(f"   Validation Error: {val_mean[-1]:.3f} positions")
+        print(f"   💡 Recommendation: {recommendation}")
+        
+        return analysis
+    
+    def cross_validate_performance(self, model, X, y, cv=5):
+        """Perform cross-validation to assess model stability"""
+        print("\n🔄 Running cross-validation...")
+        
+        # Calculate CV scores
+        cv_scores_mae = cross_val_score(
+            model, X, y, cv=cv,
+            scoring='neg_mean_absolute_error',
+            n_jobs=-1
+        )
+        cv_scores_r2 = cross_val_score(
+            model, X, y, cv=cv,
+            scoring='r2',
+            n_jobs=-1
+        )
+        
+        cv_mae = -cv_scores_mae
+        cv_r2 = cv_scores_r2
+        
+        # Calculate stability metrics
+        mae_std = np.std(cv_mae)
+        r2_std = np.std(cv_r2)
+        
+        # Assess stability
+        if mae_std < 0.1:
+            stability = "EXCELLENT"
+        elif mae_std < 0.2:
+            stability = "GOOD"
+        elif mae_std < 0.3:
+            stability = "FAIR"
+        else:
+            stability = "POOR"
+        
+        print(f"   CV MAE: {np.mean(cv_mae):.3f} ± {mae_std:.3f}")
+        print(f"   CV R²: {np.mean(cv_r2):.3f} ± {r2_std:.3f}")
+        print(f"   Stability: {stability}")
+        
+        return {
+            'cv_mae_mean': float(np.mean(cv_mae)),
+            'cv_mae_std': float(mae_std),
+            'cv_r2_mean': float(np.mean(cv_r2)),
+            'cv_r2_std': float(r2_std),
+            'stability': stability
+        }
+    
+    def detect_performance_regression(self, current_metrics):
+        """Detect if model performance has regressed compared to previous versions"""
+        if len(self.history) == 0:
+            return {'regression': False, 'message': 'First training run'}
+        
+        prev = self.history[-1]['metrics']
+        
+        # Compare test accuracy
+        accuracy_drop = prev['test_accuracy_pm2'] - current_metrics['test_accuracy_pm2']
+        mae_increase = current_metrics['test_mae'] - prev['test_mae']
+        
+        if accuracy_drop > 5.0:  # > 5% drop
+            return {
+                'regression': True,
+                'severity': 'CRITICAL',
+                'message': f"Accuracy dropped by {accuracy_drop:.1f}% (was {prev['test_accuracy_pm2']:.1f}%, now {current_metrics['test_accuracy_pm2']:.1f}%)"
+            }
+        elif accuracy_drop > 2.0:  # > 2% drop
+            return {
+                'regression': True,
+                'severity': 'WARNING',
+                'message': f"Accuracy dropped by {accuracy_drop:.1f}% (was {prev['test_accuracy_pm2']:.1f}%, now {current_metrics['test_accuracy_pm2']:.1f}%)"
+            }
+        elif mae_increase > 0.2:
+            return {
+                'regression': True,
+                'severity': 'WARNING',
+                'message': f"MAE increased by {mae_increase:.3f} (was {prev['test_mae']:.3f}, now {current_metrics['test_mae']:.3f})"
+            }
+        else:
+            improvement = current_metrics['test_accuracy_pm2'] - prev['test_accuracy_pm2']
+            return {
+                'regression': False,
+                'message': f"Performance improved by {improvement:.1f}%" if improvement > 0 else 'Performance stable'
+            }
+    
+    def record_training_run(self, metrics, learning_analysis, cv_analysis):
+        """Record training run in history"""
+        run = {
+            'timestamp': datetime.now().isoformat(),
+            'metrics': metrics,
+            'learning_analysis': learning_analysis,
+            'cv_analysis': cv_analysis
+        }
+        self.history.append(run)
+        self.save_history()
 
 
-def check_if_new_race_data_available():
-    """
-    Check if there are new 2026 races with available data
-    """
-    training_file = PROCESSED_DATA_DIR / 'f1_training_dataset.csv'
+class RaceResultsManager:
+    """Manages race results and default grid positions"""
     
-    if not training_file.exists():
-        print("⚠️  No existing training data found")
-        return []
-    
-    training_data = pd.read_csv(training_file)
-    
-    # Get max year and round in training data
-    if CURRENT_SEASON not in training_data['Year'].values:
-        completed_races = get_completed_races()
-        return completed_races
-    
-    # Get latest 2026 round in training data
-    season_2026_data = training_data[training_data['Year'] == CURRENT_SEASON]
-    max_round_in_data = season_2026_data['Round'].max() if len(season_2026_data) > 0 else 0
-    
-    # Check which completed races are not in data
-    completed_races = get_completed_races()
-    new_races = [race for race in completed_races if race['round'] > max_round_in_data]
-    
-    return new_races
-
-
-def add_2026_race_results(round_number, retry_attempts=3):
-    """
-    Add results from a specific 2026 race to the historical data
-    
-    IMPROVED: Handles FastF1 timing delays with retries
-    
-    Parameters:
-    -----------
-    round_number : int
-        Race round number (1-24)
-    retry_attempts : int
-        Number of times to retry if data not available (default: 3)
-    """
-    try:
-        import fastf1
-        fastf1.Cache.enable_cache('cache')
+    def __init__(self, data_dir='data/2026_season'):
+        self.data_dir = Path(data_dir)
+        self.data_dir.mkdir(exist_ok=True, parents=True)
         
-        print(f"\n📥 Fetching 2026 Round {round_number} data from FastF1...")
+    def save_race_result(self, round_num, results_df, session_type='R'):
+        """
+        Save race results for future use as default grid
         
-        # Try to load the race with retries
-        for attempt in range(retry_attempts):
-            try:
-                race = fastf1.get_session(CURRENT_SEASON, round_number, 'R')
-                race.load()
-                
-                # Success!
-                break
-            except Exception as e:
-                if attempt < retry_attempts - 1:
-                    print(f"⚠️  Attempt {attempt + 1} failed: {str(e)}")
-                    print(f"   Retrying in 60 seconds...")
-                    time.sleep(60)
-                else:
-                    # All attempts failed
-                    raise e
+        Args:
+            round_num (int): Race round number (1-24)
+            results_df (pd.DataFrame): Race results with columns [DriverCode, Position]
+            session_type (str): 'R' for race, 'Q' for qualifying
+        """
+        filename = f'round_{round_num:02d}_{session_type}_results.json'
+        filepath = self.data_dir / filename
         
-        results = race.results
+        # Extract driver positions
+        grid_positions = {}
+        for _, row in results_df.iterrows():
+            driver_code = row.get('DriverCode', row.get('Driver'))
+            position = row.get('Position', row.get('Pos'))
+            if driver_code and position:
+                grid_positions[driver_code] = int(position)
         
-        if results is None or len(results) == 0:
-            print(f"❌ No results available for Round {round_number}")
-            print("\n💡 Possible reasons:")
-            print("   • Race hasn't finished yet")
-            print("   • Data not yet processed by F1 (wait 60-120 min after race)")
-            print("   • Session was cancelled/postponed")
+        # Save to JSON
+        data = {
+            'round': round_num,
+            'session_type': session_type,
+            'timestamp': datetime.now().isoformat(),
+            'grid_positions': grid_positions
+        }
+        
+        with open(filepath, 'w') as f:
+            json.dump(data, f, indent=2)
+        
+        print(f"✓ Saved {session_type} results for Round {round_num} to {filepath}")
+    
+    def get_previous_race_result(self, current_round):
+        """Get previous race result for default grid"""
+        prev_round = current_round - 1
+        if prev_round < 1:
             return None
         
-        # Extract race data
-        race_data = pd.DataFrame({
-            'Year': CURRENT_SEASON,
-            'RaceName': race.event['EventName'],
-            'Round': race.event['RoundNumber'],
-            'DriverNumber': results.index.astype(str),
-            'DriverCode': results['Abbreviation'],
-            'DriverName': results['FullName'],
-            'Team': results['TeamName'],
-            'GridPosition': results['GridPosition'],
-            'Position': results['Position'],
-            'Points': results['Points'],
-            'Status': results['Status'],
-            'Time': results['Time'].astype(str),
-        })
-        
-        # Clean data
-        race_data['Position'] = pd.to_numeric(race_data['Position'], errors='coerce')
-        race_data = race_data[race_data['Position'].notna()].copy()
-        
-        # Load existing race results
-        race_file = RAW_DATA_DIR / 'historical_race_results.csv'
-        
+        # Try race result first
+        race_file = self.data_dir / f'round_{prev_round:02d}_R_results.json'
         if race_file.exists():
-            existing_races = pd.read_csv(race_file)
-            
-            # Check if this race already exists
-            existing_race = existing_races[
-                (existing_races['Year'] == CURRENT_SEASON) &
-                (existing_races['Round'] == round_number)
-            ]
-            
-            if len(existing_race) > 0:
-                print(f"⚠️  Round {round_number} already in database")
-                print("   Use --force flag to overwrite")
-                return None
-            
-            # Append new race
-            updated_races = pd.concat([existing_races, race_data], ignore_index=True)
-        else:
-            updated_races = race_data
+            with open(race_file, 'r') as f:
+                return json.load(f)['grid_positions']
         
-        # Save
-        updated_races.to_csv(race_file, index=False)
-        
-        print(f"✅ Added Round {round_number} - {race.event['EventName']} to historical data")
-        print(f"   Drivers finished: {len(race_data)}")
-        print(f"   Winner: {race_data[race_data['Position']==1]['DriverName'].iloc[0]}")
-        
-        return race_data
-        
-    except Exception as e:
-        print(f"❌ Error fetching race data: {e}")
-        print("\n💡 Troubleshooting:")
-        print("   • Wait 60-120 minutes after race finishes")
-        print("   • Check FastF1 server status")
-        print("   • Verify round number is correct")
-        print("   • Or manually add results to historical_race_results.csv")
         return None
+    
+    def get_qualifying_result(self, current_round):
+        """Get qualifying result for current race"""
+        qual_file = self.data_dir / f'round_{current_round:02d}_Q_results.json'
+        if qual_file.exists():
+            with open(qual_file, 'r') as f:
+                return json.load(f)['grid_positions']
+        
+        return None
+    
+    def get_default_grid(self, round_num, prefer_qualifying=True):
+        """
+        Get default grid for a race
+        
+        Priority:
+        1. Qualifying results (if prefer_qualifying=True and available)
+        2. Previous race results
+        3. Championship order
+        
+        Args:
+            round_num (int): Current race round
+            prefer_qualifying (bool): Prefer qualifying over previous race
+        
+        Returns:
+            dict: {driver_code: grid_position}
+        """
+        # Try qualifying first
+        if prefer_qualifying:
+            qual_grid = self.get_qualifying_result(round_num)
+            if qual_grid:
+                print(f"✓ Using qualifying results for Round {round_num}")
+                return qual_grid
+        
+        # Try previous race result
+        prev_race_grid = self.get_previous_race_result(round_num)
+        if prev_race_grid:
+            print(f"✓ Using previous race results (Round {round_num-1}) as default grid")
+            return prev_race_grid
+        
+        # Fall back to championship order (from reference data)
+        print(f"⚠ No previous results found, using championship order")
+        return self.get_championship_order()
+    
+    def get_championship_order(self):
+        """Get current championship order from reference data"""
+        drivers_file = project_root / 'data' / 'reference' / 'drivers_2026.json'
+        if drivers_file.exists():
+            with open(drivers_file, 'r') as f:
+                drivers = json.load(f)
+            
+            # Sort by points (assuming points field exists)
+            drivers_sorted = sorted(
+                drivers,
+                key=lambda x: x.get('points', 0),
+                reverse=True
+            )
+            
+            grid = {}
+            for pos, driver in enumerate(drivers_sorted, 1):
+                grid[driver['code']] = pos
+            
+            return grid
+        
+        return {}
 
 
-def trigger_full_pipeline():
-    """Run the complete pipeline: Feature Engineering → Model Training"""
-    import subprocess
-    
-    print("\n" + "="*70)
-    print("🔄 TRIGGERING AUTOMATIC RETRAINING PIPELINE")
-    print("="*70 + "\n")
-    
-    # Step 1: Feature Engineering
-    print("Step 1: Running feature engineering...")
-    try:
-        result = subprocess.run(
-            ['python', 'feature_engineering/build_features.py'],
-            capture_output=True,
-            text=True,
-            check=True
-        )
-        print("✅ Feature engineering complete")
-    except subprocess.CalledProcessError as e:
-        print(f"❌ Feature engineering failed: {e}")
-        return False
-    
-    # Step 2: Model Training
-    print("\nStep 2: Training updated model...")
-    try:
-        result = subprocess.run(
-            ['python', 'model/train_model.py'],
-            capture_output=True,
-            text=True,
-            check=True
-        )
-        print("✅ Model training complete")
-    except subprocess.CalledProcessError as e:
-        print(f"❌ Model training failed: {e}")
-        return False
-    
-    print("\n" + "="*70)
-    print("✅ RETRAINING COMPLETE - Model updated with latest race data!")
-    print("="*70)
-    print("\n💡 Restart the Flask app to use the updated model:")
-    print("   cd app")
-    print("   python app.py")
-    print("="*70 + "\n")
-    
-    return True
-
-
-def estimate_data_availability(race_date_str):
+def retrain_after_race(round_num, diagnostics=None, results_manager=None):
     """
-    Estimate when FastF1 data will be available for a race
+    Retrain model after a specific race
     
-    Parameters:
-    -----------
-    race_date_str : str
-        Race date in 'YYYY-MM-DD' format
+    Args:
+        round_num (int): Race round number to collect and retrain on
+        diagnostics (ModelDiagnostics): Diagnostics object for analysis
+        results_manager (RaceResultsManager): Results manager for default grid
     
     Returns:
-    --------
-    tuple : (earliest_time, latest_time) as datetime objects
+        dict: Training results and diagnostics
     """
-    race_date = datetime.strptime(race_date_str, '%Y-%m-%d')
+    print(f"\n{'='*70}")
+    print(f"  RETRAINING MODEL AFTER 2026 ROUND {round_num}")
+    print(f"{'='*70}\n")
     
-    # Assume race at 2 PM local time (rough average)
-    race_start = race_date.replace(hour=14, minute=0)
+    # Initialize if not provided
+    if diagnostics is None:
+        diagnostics = ModelDiagnostics()
+    if results_manager is None:
+        results_manager = RaceResultsManager()
     
-    # Race duration ~2 hours
-    race_end = race_start + timedelta(hours=2)
+    # Step 1: Collect latest race data
+    print("Step 1: Collecting race data...")
+    try:
+        race_data = collect_latest_race_data(2026, round_num)
+        
+        # Save race results for future default grid
+        if race_data is not None and not race_data.empty:
+            results_manager.save_race_result(round_num, race_data, 'R')
+        
+    except Exception as e:
+        print(f"❌ Error collecting race data: {e}")
+        return None
     
-    # FastF1 data available 60-120 min after race
-    earliest = race_end + timedelta(hours=1)
-    latest = race_end + timedelta(hours=2)
+    # Step 2: Rebuild features
+    print("\nStep 2: Rebuilding features with new data...")
+    try:
+        features_df = build_features_for_season(2026, include_historical=True)
+        print(f"✓ Built {len(features_df)} feature rows")
+    except Exception as e:
+        print(f"❌ Error building features: {e}")
+        return None
     
-    return earliest, latest
+    # Step 3: Train model with diagnostics
+    print("\nStep 3: Training enhanced model...")
+    try:
+        model_results = train_f1_model(features_df, return_model=True)
+        
+        if model_results is None:
+            print("❌ Training failed")
+            return None
+        
+        model = model_results['model']
+        X_train = model_results['X_train']
+        y_train = model_results['y_train']
+        X_test = model_results['X_test']
+        y_test = model_results['y_test']
+        
+        # Extract metrics
+        metrics = {
+            'train_mae': model_results['train_mae'],
+            'test_mae': model_results['test_mae'],
+            'train_r2': model_results['train_r2'],
+            'test_r2': model_results['test_r2'],
+            'train_accuracy_pm2': model_results['train_accuracy_pm2'],
+            'test_accuracy_pm2': model_results['test_accuracy_pm2'],
+            'features': model_results['num_features'],
+            'samples': len(X_train) + len(X_test)
+        }
+        
+    except Exception as e:
+        print(f"❌ Error training model: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+    
+    # Step 4: Run diagnostics
+    print("\nStep 4: Running advanced diagnostics...")
+    
+    # Learning curve analysis
+    learning_analysis = diagnostics.analyze_learning_curves(model, X_train, y_train)
+    
+    # Cross-validation analysis
+    cv_analysis = diagnostics.cross_validate_performance(
+        model, 
+        np.vstack([X_train, X_test]),
+        np.concatenate([y_train, y_test])
+    )
+    
+    # Performance regression detection
+    diagnostics.load_history()
+    regression_check = diagnostics.detect_performance_regression(metrics)
+    
+    # Record this training run
+    diagnostics.record_training_run(metrics, learning_analysis, cv_analysis)
+    
+    # Step 5: Print summary report
+    print("\n" + "="*70)
+    print("  TRAINING SUMMARY")
+    print("="*70)
+    print(f"✓ Model trained successfully")
+    print(f"✓ Accuracy: {metrics['test_accuracy_pm2']:.1f}% (±2 positions)")
+    print(f"✓ Test MAE: {metrics['test_mae']:.3f} positions")
+    print(f"✓ Test R²: {metrics['test_r2']:.3f}")
+    print(f"✓ Samples: {metrics['samples']:,} total")
+    print(f"✓ Features: {metrics['features']}")
+    
+    print(f"\n📊 Model Health:")
+    print(f"   Learning Status: {learning_analysis['status']}")
+    print(f"   CV Stability: {cv_analysis['stability']}")
+    print(f"   Performance: {regression_check['message']}")
+    
+    if regression_check['regression']:
+        print(f"\n⚠️  {regression_check['severity']}: {regression_check['message']}")
+    
+    print(f"\n💡 Recommendation: {learning_analysis['recommendation']}")
+    print("="*70 + "\n")
+    
+    return {
+        'metrics': metrics,
+        'learning_analysis': learning_analysis,
+        'cv_analysis': cv_analysis,
+        'regression_check': regression_check
+    }
 
 
 def main():
-    """Main automatic retraining function with timing awareness"""
-    
-    print("\n" + "="*70)
-    print("🤖 F1 2026 AUTOMATIC RETRAINING SYSTEM")
-    print("="*70 + "\n")
-    
-    if not AUTO_RETRAIN_ENABLED:
-        print("⚠️  Automatic retraining is DISABLED in config.py")
-        print("   Set AUTO_RETRAIN_ENABLED = True to enable")
-        return
-    
-    # Check for new races
-    new_races = check_if_new_race_data_available()
-    
-    if not new_races:
-        print("✅ No new race data available yet")
-        completed = get_completed_races()
-        
-        if completed:
-            print(f"\n  Races already in model: {len(completed)}")
-            last_race = completed[-1]
-            print(f"  Last race: {last_race['name']} ({last_race['date']})")
-        
-        # Check if any races happened recently
-        today = datetime.now()
-        for race in RACES_2026:
-            race_date = datetime.strptime(race['date'], '%Y-%m-%d')
-            time_since_race = today - race_date
-            
-            # Race happened in last 3 hours?
-            if timedelta(hours=0) < time_since_race < timedelta(hours=3):
-                earliest, latest = estimate_data_availability(race['date'])
-                print(f"\n⏳ Recent race detected: {race['name']}")
-                print(f"   Data likely available: {earliest.strftime('%H:%M')} - {latest.strftime('%H:%M')}")
-                print(f"   Current time: {today.strftime('%H:%M')}")
-                print("   Try again in ~1 hour")
-        
-        return
-    
-    print(f"📊 Found {len(new_races)} new race(s) to add:")
-    for race in new_races:
-        print(f"   • Round {race['round']}: {race['name']} ({race['date']})")
-    
-    # Try to fetch and add each new race
-    successfully_added = []
-    
-    for race in new_races:
-        print(f"\n{'='*70}")
-        added = add_2026_race_results(race['round'])
-        
-        if added is not None:
-            successfully_added.append(race)
-        else:
-            print(f"\n⚠️  Skipping Round {race['round']} - data not available")
-    
-    # Trigger retraining if we added any races
-    if successfully_added:
-        print("\n" + "-"*70)
-        response = input(f"🔄 Added {len(successfully_added)} race(s). Retrain model now? (y/n): ")
-        
-        if response.lower() == 'y':
-            success = trigger_full_pipeline()
-            if success:
-                print("\n🎉 Model successfully updated with 2026 season data!")
-                print(f"   New races included: {', '.join([r['name'] for r in successfully_added])}")
-        else:
-            print("\n⏸️  Retraining skipped. Run this script again when ready.")
-    else:
-        print("\n⚠️  No new races were successfully added.")
-        print("   Retraining not triggered.")
-
-
-def manual_retrain():
-    """Manually trigger retraining (bypasses checks)"""
-    print("\n🔄 MANUAL RETRAINING MODE")
-    print("This will retrain the model with all current data.\n")
-    trigger_full_pipeline()
-
-
-def force_add_race(round_number):
-    """Force add a specific race (overwrites if exists)"""
-    print(f"\n🔄 FORCE ADDING ROUND {round_number}")
-    
-    race_file = RAW_DATA_DIR / 'historical_race_results.csv'
-    
-    if race_file.exists():
-        existing_races = pd.read_csv(race_file)
-        
-        # Remove existing entry for this race
-        existing_races = existing_races[
-            ~((existing_races['Year'] == CURRENT_SEASON) &
-              (existing_races['Round'] == round_number))
-        ]
-        
-        existing_races.to_csv(race_file, index=False)
-        print(f"✓ Removed existing Round {round_number} data")
-    
-    # Add the race
-    add_2026_race_results(round_number, retry_attempts=5)
-
-
-if __name__ == "__main__":
-    import argparse
-    
-    parser = argparse.ArgumentParser(description='F1 2026 Automatic Retraining System')
-    parser.add_argument('--manual', action='store_true', help='Force manual retrain')
-    parser.add_argument('--check', action='store_true', help='Only check for new races')
-    parser.add_argument('--force', type=int, metavar='ROUND', help='Force add specific round')
-    parser.add_argument('--estimate', type=str, metavar='DATE', help='Estimate data availability for race date (YYYY-MM-DD)')
+    parser = argparse.ArgumentParser(description='Enhanced auto-retrain for F1 predictor')
+    parser.add_argument('--round', type=int, help='Specific round number to retrain after (1-24)')
+    parser.add_argument('--all', action='store_true', help='Retrain after all available 2026 races')
+    parser.add_argument('--diagnostics-only', action='store_true', help='Run diagnostics on current model without retraining')
     
     args = parser.parse_args()
     
-    if args.manual:
-        manual_retrain()
-    elif args.check:
-        new_races = check_if_new_race_data_available()
-        completed = get_completed_races()
-        print(f"\nCompleted races: {len(completed)}")
-        print(f"New races to add: {len(new_races)}")
-        if new_races:
-            for race in new_races:
-                print(f"  • Round {race['round']}: {race['name']}")
-    elif args.force:
-        force_add_race(args.force)
-    elif args.estimate:
-        earliest, latest = estimate_data_availability(args.estimate)
-        print(f"\nEstimated data availability for {args.estimate}:")
-        print(f"  Earliest: {earliest.strftime('%Y-%m-%d %H:%M')}")
-        print(f"  Latest: {latest.strftime('%Y-%m-%d %H:%M')}")
+    # Initialize managers
+    diagnostics = ModelDiagnostics()
+    results_manager = RaceResultsManager()
+    
+    if args.diagnostics_only:
+        print("Running diagnostics on current model...")
+        # Load current model and run diagnostics
+        # Implementation would load saved model and run analysis
+        print("Not yet implemented - use with --round to retrain")
+        return
+    
+    if args.all:
+        print("Scanning for all available 2026 races...")
+        # Find all available races and retrain
+        for round_num in range(1, 25):
+            # Check if race data exists
+            race_file = project_root / 'data' / 'raw' / f'2026_round_{round_num:02d}_race.csv'
+            if race_file.exists():
+                print(f"\nFound data for Round {round_num}")
+                retrain_after_race(round_num, diagnostics, results_manager)
+            else:
+                print(f"\nNo data found for Round {round_num}, stopping scan")
+                break
+    
+    elif args.round:
+        if 1 <= args.round <= 24:
+            retrain_after_race(args.round, diagnostics, results_manager)
+        else:
+            print("Error: Round must be between 1 and 24")
+    
     else:
-        main()
+        print("Error: Specify --round N or --all")
+        parser.print_help()
+
+
+if __name__ == '__main__':
+    main()

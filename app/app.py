@@ -3,7 +3,6 @@ Flask Backend for F1 2026 Race Predictor
 CORRECTED VERSION - Fixed driver name display issue
 """
 
-import os
 import sys
 from pathlib import Path
 from datetime import datetime
@@ -45,6 +44,7 @@ class F1RacePredictor:
         self.drivers_2026 = None
         self.teams_2026 = None
         self.training_data = None
+        self.team_stats = {}   # computed from training data at load time
 
     def load_model(self):
         """Load trained model + reference csvs + training data"""
@@ -64,11 +64,25 @@ class F1RacePredictor:
             if training_file.exists():
                 self.training_data = pd.read_csv(training_file)
                 print(f"✓ Training data loaded ({len(self.training_data)} records)")
-                
-                # Show available driver codes
+
                 if "DriverCode" in self.training_data.columns:
                     unique_codes = self.training_data["DriverCode"].unique()
                     print(f"✓ Found {len(unique_codes)} unique drivers in training data")
+
+                # Pre-compute per-team historical stats so predictions use real values
+                # instead of hardcoded constants (200, 11, 11).
+                if "Team" in self.training_data.columns and "Position" in self.training_data.columns:
+                    for team_name, grp in self.training_data.groupby("Team"):
+                        self.team_stats[team_name] = {
+                            "TeamRaceAvgPosition": float(grp["Position"].mean()),
+                            "TeamYearAvgPosition": float(grp["Position"].mean()),
+                            "TeamYearPoints": (
+                                float(grp["Points"].sum() / grp["Year"].nunique())
+                                if "Points" in grp.columns and "Year" in grp.columns
+                                else 200.0
+                            ),
+                        }
+                    print(f"✓ Team stats computed for {len(self.team_stats)} teams")
             else:
                 self.training_data = pd.DataFrame()
                 print("⚠️  Training data not found")
@@ -196,11 +210,8 @@ class F1RacePredictor:
             driver_code = driver["DriverCode"]
             driver_team = driver["Team"]
 
-            team_df = self.teams_2026[self.teams_2026["Team"] == driver_team]
-            if team_df.empty:
+            if self.teams_2026[self.teams_2026["Team"] == driver_team].empty:
                 raise ValueError(f"Team '{driver_team}' not found")
-
-            team = team_df.iloc[0]
 
             # Get track-specific features
             track_features = self._get_track_features(driver_code, driver_team, race_name)
@@ -271,10 +282,10 @@ class F1RacePredictor:
                 "TotalPoints": driver_total_pts,
                 "BestFinish": driver_best_pos,
                 
-                # Team features (5 features)
-                "TeamYearPoints": 200.0,
-                "TeamYearAvgPosition": 11.0,
-                "TeamRaceAvgPosition": 11.0,
+                # Team features (5 features) — from historical training data per team
+                "TeamYearPoints": self.team_stats.get(driver_team, {}).get("TeamYearPoints", 200.0),
+                "TeamYearAvgPosition": self.team_stats.get(driver_team, {}).get("TeamYearAvgPosition", 11.0),
+                "TeamRaceAvgPosition": self.team_stats.get(driver_team, {}).get("TeamRaceAvgPosition", 11.0),
                 "ChampionshipsWon": float(driver.get("championships", 0)),
                 "YearsInF1": 10.0,
                 

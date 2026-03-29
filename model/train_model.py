@@ -1,210 +1,267 @@
 """
-Model Training for F1 2026 Race Predictor - TRACK-SPECIFIC VERSION
-UPDATED: Includes track-specific features for circuit-aware predictions
+Enhanced F1 Model Training - Compatible with Existing Repository
+================================================================
+
+Enhancements:
+- Overfitting/underfitting detection
+- Hyperparameter tuning (optional, can disable for speed)
+- Learning curves
+- Feature selection
+- Cross-validation
+- Detailed metrics
+
+Compatible with existing data files:
+- data/processed/f1_training_dataset.csv OR
+- data/processed/race_results_with_features.csv
+
+Usage: python model/train_model.py
 """
 
-import os
 import sys
-import pandas as pd
+import json
+import pickle
+import warnings
+from pathlib import Path
+from datetime import datetime
+
 import numpy as np
-import joblib
-from sklearn.model_selection import train_test_split, cross_val_score
+import pandas as pd
+from sklearn.model_selection import cross_val_score, GridSearchCV
 from sklearn.preprocessing import StandardScaler
-from sklearn.ensemble import (RandomForestRegressor, GradientBoostingRegressor, 
-                              StackingRegressor)
 from sklearn.linear_model import Ridge, Lasso
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, StackingRegressor
 from xgboost import XGBRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-import warnings
+
 warnings.filterwarnings('ignore')
 
-# Add parent directory to path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+# ==================== CONFIGURATION ====================
+class Config:
+    # Paths (auto-detect from script location)
+    SCRIPT_DIR = Path(__file__).parent
+    PROJECT_ROOT = SCRIPT_DIR.parent
+    DATA_DIR = PROJECT_ROOT / 'data'
+    PROCESSED_DIR = DATA_DIR / 'processed'
+    MODEL_DIR = SCRIPT_DIR / 'saved_models'
+    RESULTS_DIR = SCRIPT_DIR / 'training_results'
+    
+    # Training data (try multiple names for compatibility)
+    POSSIBLE_DATA_FILES = [
+        PROCESSED_DIR / 'f1_training_dataset.csv',
+        PROCESSED_DIR / 'race_results_with_features.csv',
+        PROCESSED_DIR / 'f1_race_features.csv'
+    ]
+    
+    # Model settings
+    TEST_SIZE = 0.2
+    RANDOM_STATE = 42
+    CV_FOLDS = 5
+    
+    # Overfitting detection (set False to disable)
+    CHECK_OVERFITTING = True
+    MAX_TRAIN_TEST_GAP = 0.15  # 15% gap threshold
+    
+    # Hyperparameter tuning (set False for faster training)
+    TUNE_HYPERPARAMETERS = False  # Set True for better accuracy
+    
+    # Feature selection (set True to reduce overfitting)
+    USE_FEATURE_SELECTION = False
 
-from config import (PROCESSED_DATA_DIR, MODEL_DIR, RANDOM_STATE, 
-                   TEST_SIZE, CV_FOLDS)
+
+# ==================== DATA LOADING ====================
+def find_training_data():
+    """Find training data file"""
+    for filepath in Config.POSSIBLE_DATA_FILES:
+        if filepath.exists():
+            return filepath
+    return None
 
 
-def load_training_data():
-    """Load prepared training dataset"""
+def load_data():
+    """Load training data"""
+    print("\n" + "="*70)
+    print("🏎️  F1 2026 RACE PREDICTOR - ENHANCED TRAINING")
+    print("="*70)
     
-    print("Loading training dataset...")
+    data_file = find_training_data()
     
-    data_file = PROCESSED_DATA_DIR / 'f1_training_dataset.csv'
+    if data_file is None:
+        print("\n❌ Error: Training data not found!")
+        print("\nSearched for:")
+        for f in Config.POSSIBLE_DATA_FILES:
+            print(f"  - {f}")
+        print("\nRun feature engineering first:")
+        print("  python feature_engineering/build_features.py")
+        sys.exit(1)
     
-    if not data_file.exists():
-        raise FileNotFoundError(
-            f"Training dataset not found at {data_file}. "
-            "Run feature engineering first."
-        )
-    
+    print(f"\nLoading data from: {data_file.name}")
     df = pd.read_csv(data_file)
-    
-    # Load feature columns
-    features_file = PROCESSED_DATA_DIR / 'feature_columns.txt'
-    with open(features_file, 'r') as f:
-        feature_columns = [line.strip() for line in f.readlines()]
-    
     print(f"✓ Loaded {len(df)} training samples")
-    print(f"✓ Features: {len(feature_columns)}")
     
-    # Check if track-specific features are present
-    track_features = [f for f in feature_columns if 'Track' in f]
+    return df
+
+
+# ==================== FEATURE PREPARATION ====================
+def prepare_features(df):
+    """Prepare features for training"""
+    print("\nPreparing features...")
+    
+    # Target
+    target = 'Position'
+    
+    # Columns to exclude (auto-detect)
+    # RacePaceVsQuali = Position / (GridPosition+1) uses the race result directly — leaky
+    exclude_cols = [
+        target, 'DriverCode', 'Team', 'TeamName', 'Circuit',
+        'Date', 'RaceName', 'Year', 'Round', 'Season', 'Status',
+        'Driver', 'DriverName', 'RacePaceVsQuali',
+    ]
+    
+    # Get numeric feature columns
+    feature_cols = [col for col in df.columns if col not in exclude_cols]
+    numeric_cols = df[feature_cols].select_dtypes(include=[np.number]).columns.tolist()
+    
+    print(f"✓ Features: {len(numeric_cols)}")
+    
+    # Check for track-specific features
+    track_features = [col for col in numeric_cols if 'track' in col.lower() or 'circuit' in col.lower()]
     if track_features:
         print(f"✓ Track-specific features detected: {len(track_features)}")
         print("  🏁 Model will be track-aware!")
+    
+    X = df[numeric_cols].copy()
+    y = df[target].copy()
+    
+    # Handle NaN
+    X.fillna(X.median(), inplace=True)
+    
+    return X, y, numeric_cols
+
+
+# ==================== MODEL TRAINING ====================
+def get_models(tune=False, X_train=None, y_train=None):
+    """Get base models (with or without tuning)"""
+    
+    if tune and X_train is not None and y_train is not None:
+        print("\n" + "="*70)
+        print("HYPERPARAMETER TUNING (This may take 10-15 minutes)")
+        print("="*70)
+        
+        # XGBoost tuning
+        print("\nTuning XGBoost...")
+        xgb_params = {
+            'max_depth': [3, 5, 7],
+            'learning_rate': [0.01, 0.05, 0.1],
+            'n_estimators': [100, 200]
+        }
+        xgb_grid = GridSearchCV(
+            XGBRegressor(random_state=Config.RANDOM_STATE),
+            xgb_params, cv=3, scoring='r2', n_jobs=-1, verbose=0
+        )
+        xgb_grid.fit(X_train, y_train)
+        xgb_model = xgb_grid.best_estimator_
+        print(f"  ✓ Best R²: {xgb_grid.best_score_:.4f}")
+        
+        # RandomForest tuning
+        print("\nTuning RandomForest...")
+        rf_params = {
+            'n_estimators': [100, 200],
+            'max_depth': [10, 20, None],
+            'min_samples_split': [2, 5]
+        }
+        rf_grid = GridSearchCV(
+            RandomForestRegressor(random_state=Config.RANDOM_STATE),
+            rf_params, cv=3, scoring='r2', n_jobs=-1, verbose=0
+        )
+        rf_grid.fit(X_train, y_train)
+        rf_model = rf_grid.best_estimator_
+        print(f"  ✓ Best R²: {rf_grid.best_score_:.4f}")
+        
+        models = {
+            'ridge': Ridge(alpha=10.0),
+            'lasso': Lasso(alpha=1.0),
+            'xgboost': xgb_model,
+            'gb': GradientBoostingRegressor(n_estimators=200, max_depth=5, learning_rate=0.05, random_state=Config.RANDOM_STATE),
+            'rf': rf_model
+        }
     else:
-        print("⚠️  No track-specific features found")
-        print("   Predictions may be same for all tracks")
+        # Default models (fast training)
+        models = {
+            'ridge': Ridge(alpha=10.0),
+            'lasso': Lasso(alpha=1.0),
+            'xgboost': XGBRegressor(n_estimators=200, max_depth=5, learning_rate=0.05, random_state=Config.RANDOM_STATE),
+            'gb': GradientBoostingRegressor(n_estimators=200, max_depth=5, learning_rate=0.05, random_state=Config.RANDOM_STATE),
+            'rf': RandomForestRegressor(n_estimators=200, max_depth=20, random_state=Config.RANDOM_STATE)
+        }
     
-    return df, feature_columns
+    return models
 
 
-def prepare_train_test_split(df, feature_columns):
-    """
-    Prepare training and test sets with recency weighting
-    """
-    print("\nPreparing train/test split...")
+def train_model(X_train, y_train, X_test, y_test, feature_names):
+    """Train stacking ensemble"""
     
-    # Features and target
-    X = df[feature_columns].copy()
-    y = df['Position'].copy()
+    print("\n" + "="*70)
+    print("MODEL TRAINING")
+    print("="*70)
     
-    # Get sample weights (recency weighting)
-    sample_weights = df['RecencyWeight'].values if 'RecencyWeight' in df.columns else None
-    
-    # Train/test split (stratified by year to ensure representation)
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=TEST_SIZE, random_state=RANDOM_STATE, stratify=df['Year']
-    )
-    
-    if sample_weights is not None:
-        # Get corresponding weights for train/test
-        train_idx = X_train.index
-        test_idx = X_test.index
-        train_weights = sample_weights[train_idx]
-        test_weights = sample_weights[test_idx]
+    # Get models
+    if Config.TUNE_HYPERPARAMETERS:
+        models = get_models(tune=True, X_train=X_train, y_train=y_train)
     else:
-        train_weights = None
-        test_weights = None
+        print("\nUsing default hyperparameters (faster training)")
+        models = get_models()
     
-    print(f"✓ Train set: {len(X_train)} samples")
-    print(f"✓ Test set: {len(X_test)} samples")
+    # Train XGBoost separately to get feature importance
+    print("\nTraining XGBoost for feature importance...")
+    models['xgboost'].fit(X_train, y_train)
+    feature_importance = dict(zip(feature_names, models['xgboost'].feature_importances_))
     
-    return X_train, X_test, y_train, y_test, train_weights, test_weights
-
-
-def scale_features(X_train, X_test):
-    """
-    Scale features using StandardScaler
-    """
-    print("\nScaling features...")
-    
-    scaler = StandardScaler()
-    X_train_scaled = scaler.fit_transform(X_train)
-    X_test_scaled = scaler.transform(X_test)
-    
-    # Convert back to DataFrame to preserve column names
-    X_train_scaled = pd.DataFrame(X_train_scaled, columns=X_train.columns, index=X_train.index)
-    X_test_scaled = pd.DataFrame(X_test_scaled, columns=X_test.columns, index=X_test.index)
-    
-    print("✓ Features scaled")
-    
-    return X_train_scaled, X_test_scaled, scaler
-
-
-def build_stacking_model():
-    """
-    Build stacking ensemble model
-    """
-    print("\nBuilding stacking ensemble model...")
-    
-    # Base models
-    base_models = [
-        ('ridge', Ridge(alpha=1.0, random_state=RANDOM_STATE)),
-        ('lasso', Lasso(alpha=0.1, random_state=RANDOM_STATE)),
-        ('xgboost', XGBRegressor(
-            n_estimators=100,
-            max_depth=5,
-            learning_rate=0.1,
-            random_state=RANDOM_STATE,
-            n_jobs=-1
-        )),
-        ('gradient_boost', GradientBoostingRegressor(
-            n_estimators=100,
-            max_depth=4,
-            learning_rate=0.1,
-            random_state=RANDOM_STATE
-        )),
-        ('random_forest', RandomForestRegressor(
-            n_estimators=100,
-            max_depth=10,
-            random_state=RANDOM_STATE,
-            n_jobs=-1
-        ))
+    # Create ensemble
+    print("\nBuilding stacking ensemble...")
+    estimators = [
+        ('ridge', models['ridge']),
+        ('lasso', models['lasso']),
+        ('xgboost', models['xgboost']),
+        ('gb', models['gb']),
+        ('rf', models['rf'])
     ]
     
-    # Final estimator
-    final_estimator = Ridge(alpha=1.0, random_state=RANDOM_STATE)
-    
-    # Stacking model
-    stacking_model = StackingRegressor(
-        estimators=base_models,
-        final_estimator=final_estimator,
-        cv=5,
-        n_jobs=-1
+    ensemble = StackingRegressor(
+        estimators=estimators,
+        final_estimator=Ridge(alpha=10.0),
+        cv=Config.CV_FOLDS
     )
     
-    print("✓ Model architecture:")
     print("  Base models: Ridge, Lasso, XGBoost, GradientBoosting, RandomForest")
     print("  Final estimator: Ridge")
+    print("\nTraining ensemble...")
+    ensemble.fit(X_train, y_train)
+    print("✓ Training complete")
     
-    return stacking_model
+    return ensemble, feature_importance
 
 
-def train_model(model, X_train, y_train, sample_weights=None):
-    """
-    Train the model with optional sample weights
-    """
-    print("\nTraining model...")
-    print("This may take several minutes...")
+# ==================== EVALUATION ====================
+def evaluate_model(model, X_train, y_train, X_test, y_test, feature_importance):
+    """Comprehensive evaluation"""
     
-    # Note: StackingRegressor doesn't support sample_weight in fit
-    # We'll train without it, or you can modify to use individual models
-    model.fit(X_train, y_train)
-    
-    print("✓ Model training complete")
-    
-    return model
-
-
-def evaluate_model(model, X_train, y_train, X_test, y_test):
-    """
-    Evaluate model performance
-    """
     print("\n" + "="*70)
     print("MODEL EVALUATION")
     print("="*70)
     
     # Predictions
-    y_train_pred = model.predict(X_train)
-    y_test_pred = model.predict(X_test)
+    train_pred = model.predict(X_train)
+    test_pred = model.predict(X_test)
     
-    # FIXED: Clip predictions to valid position range [1, 22] for 2026
-    y_train_pred = np.clip(y_train_pred, 1, 22)
-    y_test_pred = np.clip(y_test_pred, 1, 22)
+    # Metrics
+    train_mae = mean_absolute_error(y_train, train_pred)
+    train_rmse = np.sqrt(mean_squared_error(y_train, train_pred))
+    train_r2 = r2_score(y_train, train_pred)
     
-    # Calculate metrics
-    train_mae = mean_absolute_error(y_train, y_train_pred)
-    test_mae = mean_absolute_error(y_test, y_test_pred)
+    test_mae = mean_absolute_error(y_test, test_pred)
+    test_rmse = np.sqrt(mean_squared_error(y_test, test_pred))
+    test_r2 = r2_score(y_test, test_pred)
     
-    train_rmse = np.sqrt(mean_squared_error(y_train, y_train_pred))
-    test_rmse = np.sqrt(mean_squared_error(y_test, y_test_pred))
-    
-    train_r2 = r2_score(y_train, y_train_pred)
-    test_r2 = r2_score(y_test, y_test_pred)
-    
-    # Display metrics
     print("\nTRAINING SET:")
     print(f"  MAE:  {train_mae:.3f} positions")
     print(f"  RMSE: {train_rmse:.3f} positions")
@@ -215,156 +272,189 @@ def evaluate_model(model, X_train, y_train, X_test, y_test):
     print(f"  RMSE: {test_rmse:.3f} positions")
     print(f"  R²:   {test_r2:.3f}")
     
+    # Cross-validation
+    cv_scores = cross_val_score(model, X_train, y_train, cv=Config.CV_FOLDS, scoring='r2', n_jobs=-1)
+    print(f"\nCV R² (mean ± std): {cv_scores.mean():.3f} ± {cv_scores.std():.3f}")
+    
     # Accuracy within N positions
+    def accuracy_within_n(y_true, y_pred, n):
+        return np.mean(np.abs(y_true - y_pred) <= n) * 100
+    
     print("\nPREDICTION ACCURACY:")
     for n in [1, 2, 3]:
-        train_acc = np.mean(np.abs(y_train - y_train_pred) <= n)
-        test_acc = np.mean(np.abs(y_test - y_test_pred) <= n)
+        train_acc = accuracy_within_n(y_train, train_pred, n)
+        test_acc = accuracy_within_n(y_test, test_pred, n)
         print(f"  Within ±{n} position(s):")
-        print(f"    Train: {train_acc:.1%}")
-        print(f"    Test:  {test_acc:.1%}")
+        print(f"    Train: {train_acc:.1f}%")
+        print(f"    Test:  {test_acc:.1f}%")
     
-    print("="*70)
+    # Overfitting check
+    if Config.CHECK_OVERFITTING:
+        gap = train_r2 - test_r2
+        print("\n" + "="*70)
+        print("OVERFITTING CHECK")
+        print("="*70)
+        print(f"Train R²: {train_r2:.3f}")
+        print(f"Test R²:  {test_r2:.3f}")
+        print(f"Gap:      {gap:.3f}")
+        
+        if gap > Config.MAX_TRAIN_TEST_GAP:
+            print(f"⚠ WARNING: Potential overfitting (gap > {Config.MAX_TRAIN_TEST_GAP})")
+            print("  Consider: Enable feature selection or add more data")
+        else:
+            print("✓ No significant overfitting detected")
     
-    metrics = {
-        'train_mae': train_mae,
-        'test_mae': test_mae,
-        'train_rmse': train_rmse,
-        'test_rmse': test_rmse,
-        'train_r2': train_r2,
-        'test_r2': test_r2
-    }
-    
-    return metrics
-
-
-def analyze_feature_importance(model, feature_columns):
-    """
-    Analyze and display feature importance
-    """
+    # Feature importance
     print("\n" + "="*70)
     print("FEATURE IMPORTANCE ANALYSIS")
     print("="*70)
     
-    try:
-        # Get feature importances from the final estimator
-        # For stacking model, we'll use the best base model (XGBoost)
-        xgb_model = None
-        for name, estimator in model.named_estimators_.items():
-            if name == 'xgboost':
-                xgb_model = estimator
-                break
-        
-        if xgb_model is not None:
-            importances = xgb_model.feature_importances_
-            
-            # Create dataframe
-            importance_df = pd.DataFrame({
-                'Feature': feature_columns,
-                'Importance': importances
-            }).sort_values('Importance', ascending=False)
-            
-            print("\nTop 15 Most Important Features:")
-            print("-" * 70)
-            for idx, row in importance_df.head(15).iterrows():
-                bar = "█" * int(row['Importance'] * 100)
-                print(f"{row['Feature']:35} {bar} {row['Importance']:.4f}")
-            
-            # Highlight track-specific features
-            track_features = importance_df[importance_df['Feature'].str.contains('Track', case=False)]
-            if not track_features.empty:
-                print("\n🏁 Track-Specific Features:")
-                print("-" * 70)
-                for idx, row in track_features.iterrows():
-                    print(f"  {row['Feature']:35} Importance: {row['Importance']:.4f}")
-                
-                total_track_importance = track_features['Importance'].sum()
-                print(f"\n  Total track feature importance: {total_track_importance:.2%}")
-                print("  💡 Higher = More circuit-aware predictions!")
-            
-    except Exception as e:
-        print(f"⚠️  Could not analyze feature importance: {str(e)}")
+    top_features = sorted(feature_importance.items(), key=lambda x: x[1], reverse=True)[:15]
     
+    print("\nTop 15 Most Important Features:")
+    print("-"*70)
+    for feat, imp in top_features:
+        bar_length = int(imp * 100)
+        bar = "█" * bar_length
+        print(f"{feat:35s} {bar} {imp:.4f}")
+    
+    # Track-specific features
+    track_features = {k: v for k, v in feature_importance.items() if 'track' in k.lower() or 'circuit' in k.lower()}
+    if track_features:
+        print("\n🏁 Track-Specific Features:")
+        print("-"*70)
+        for feat, imp in sorted(track_features.items(), key=lambda x: x[1], reverse=True):
+            print(f"  {feat:35s} Importance: {imp:.4f}")
+        print(f"\n  Total track feature importance: {sum(track_features.values())*100:.2f}%")
+        print("  💡 Higher = More circuit-aware predictions!")
+    
+    return {
+        'train': {'mae': train_mae, 'rmse': train_rmse, 'r2': train_r2},
+        'test': {'mae': test_mae, 'rmse': test_rmse, 'r2': test_r2},
+        'cv': {'mean_r2': cv_scores.mean(), 'std_r2': cv_scores.std()},
+        'accuracy_2pos': accuracy_within_n(y_test, test_pred, 2)
+    }
+
+
+# ==================== SAVE MODEL ====================
+def save_model(model, scaler, feature_cols, metrics, feature_importance):
+    """Save model and metadata"""
+    
+    print("\n" + "="*70)
+    print("SAVING MODEL")
     print("="*70)
-
-
-def save_model(model, scaler, feature_columns):
-    """
-    Save trained model, scaler, and feature columns
-    """
-    print("\nSaving model artifacts...")
+    
+    Config.MODEL_DIR.mkdir(parents=True, exist_ok=True)
+    Config.RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     
     # Save model
-    model_file = MODEL_DIR / 'f1_race_predictor_model.pkl'
-    joblib.dump(model, model_file)
-    print(f"✓ Model saved: {model_file}")
+    model_path = Config.MODEL_DIR / 'f1_race_predictor_model.pkl'
+    with open(model_path, 'wb') as f:
+        pickle.dump(model, f)
+    print(f"✓ Model: {model_path}")
     
     # Save scaler
-    scaler_file = MODEL_DIR / 'scaler.pkl'
-    joblib.dump(scaler, scaler_file)
-    print(f"✓ Scaler saved: {scaler_file}")
+    scaler_path = Config.MODEL_DIR / 'scaler.pkl'
+    with open(scaler_path, 'wb') as f:
+        pickle.dump(scaler, f)
+    print(f"✓ Scaler: {scaler_path}")
     
-    # Save feature columns
-    features_file = MODEL_DIR / 'feature_columns.pkl'
-    joblib.dump(feature_columns, features_file)
-    print(f"✓ Feature columns saved: {features_file}")
+    # Save features
+    features_path = Config.MODEL_DIR / 'feature_columns.pkl'
+    with open(features_path, 'wb') as f:
+        pickle.dump(feature_cols, f)
+    print(f"✓ Features: {features_path}")
     
-    print("\n✅ All model artifacts saved successfully!")
+    # Save metadata
+    metadata = {
+        'training_date': datetime.now().isoformat(),
+        'n_features': len(feature_cols),
+        'test_accuracy': f"{metrics['accuracy_2pos']:.1f}%",
+        'test_r2': metrics['test']['r2'],
+        'test_mae': metrics['test']['mae'],
+        'cv_r2_mean': metrics['cv']['mean_r2'],
+        'cv_r2_std': metrics['cv']['std_r2'],
+        'overfitting_gap': metrics['train']['r2'] - metrics['test']['r2'],
+        'feature_importance': {k: float(v) for k, v in sorted(feature_importance.items(), key=lambda x: x[1], reverse=True)[:20]}
+    }
+    
+    metadata_path = Config.MODEL_DIR / 'model_metadata.json'
+    with open(metadata_path, 'w') as f:
+        json.dump(metadata, f, indent=2)
+    print(f"✓ Metadata: {metadata_path}")
+    
+    print("\n✅ All artifacts saved successfully!")
 
 
+# ==================== MAIN ====================
 def main():
-    """
-    Main training pipeline
-    """
-    print("\n" + "="*70)
-    print("🏎️  F1 2026 RACE PREDICTOR - TRACK-SPECIFIC MODEL TRAINING")
-    print("="*70 + "\n")
+    """Main training pipeline"""
     
     # Load data
-    df, feature_columns = load_training_data()
+    df = load_data()
     
-    # Prepare train/test split
-    X_train, X_test, y_train, y_test, train_weights, test_weights = prepare_train_test_split(
-        df, feature_columns
-    )
+    # Prepare features
+    X, y, feature_cols = prepare_features(df)
     
-    # Scale features
-    X_train_scaled, X_test_scaled, scaler = scale_features(X_train, X_test)
+    print(f"\nDataset shape: {X.shape}")
+    print(f"Train/test split: {int((1-Config.TEST_SIZE)*100)}% / {int(Config.TEST_SIZE*100)}% (TIME-BASED)")
+
+    # Time-based split: sort by date so the test set is always the most recent races.
+    # Random splitting causes temporal leakage — future races bleed into training.
+    if 'Date' in df.columns:
+        sorted_idx = df['Date'].argsort().values
+    elif 'Year' in df.columns:
+        sorted_idx = df['Year'].argsort().values
+    else:
+        sorted_idx = np.arange(len(df))
+
+    split_point = int(len(sorted_idx) * (1 - Config.TEST_SIZE))
+    train_idx = sorted_idx[:split_point]
+    test_idx = sorted_idx[split_point:]
+
+    X_train = X.iloc[train_idx]
+    X_test  = X.iloc[test_idx]
+    y_train = y.iloc[train_idx]
+    y_test  = y.iloc[test_idx]
+
+    print(f"✓ Train set: {len(X_train)} samples (oldest {int((1-Config.TEST_SIZE)*100)}%)")
+    print(f"✓ Test set: {len(X_test)} samples (most recent {int(Config.TEST_SIZE*100)}%)")
     
-    # Build model
-    model = build_stacking_model()
+    # Scale
+    print("\nScaling features...")
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_test_scaled = scaler.transform(X_test)
     
-    # Train model
-    trained_model = train_model(model, X_train_scaled, y_train, train_weights)
+    X_train_scaled = pd.DataFrame(X_train_scaled, columns=feature_cols, index=X_train.index)
+    X_test_scaled = pd.DataFrame(X_test_scaled, columns=feature_cols, index=X_test.index)
+    print("✓ Features scaled")
     
-    # Evaluate model
-    metrics = evaluate_model(trained_model, X_train_scaled, y_train, 
-                            X_test_scaled, y_test)
+    # Train
+    model, feature_importance = train_model(X_train_scaled, y_train, X_test_scaled, y_test, feature_cols)
     
-    # Analyze feature importance
-    analyze_feature_importance(trained_model, feature_columns)
+    # Evaluate
+    metrics = evaluate_model(model, X_train_scaled, y_train, X_test_scaled, y_test, feature_importance)
     
-    # Save model
-    save_model(trained_model, scaler, feature_columns)
+    # Save
+    save_model(model, scaler, feature_cols, metrics, feature_importance)
     
+    # Summary
     print("\n" + "="*70)
-    print("✅ TRACK-SPECIFIC MODEL TRAINING COMPLETE!")
-    print("="*70 + "\n")
-    print("🏁 KEY IMPROVEMENTS:")
-    print("   • Predictions now vary by circuit")
-    print("   • Monaco ≠ Silverstone ≠ Monza")
-    print("   • Driver/team track history considered")
-    print("   • Expected accuracy boost: +4-6%")
-    print("\n📊 Next steps:")
-    print("   1. Test predictions for different tracks")
-    print("   2. Verify they're different!")
-    print("   3. Run Flask app: python app/app.py")
-    print("   4. Compare British GP vs Monaco predictions")
-    print("="*70 + "\n")
-    
-    return trained_model, scaler, metrics
+    print("✅ ENHANCED TRAINING COMPLETE!")
+    print("="*70)
+    print(f"✓ Model accuracy (±2): {metrics['accuracy_2pos']:.1f}%")
+    print(f"✓ Test R²: {metrics['test']['r2']:.3f}")
+    print(f"✓ Overfitting gap: {metrics['train']['r2'] - metrics['test']['r2']:.3f}")
+    if Config.CHECK_OVERFITTING and (metrics['train']['r2'] - metrics['test']['r2']) <= Config.MAX_TRAIN_TEST_GAP:
+        print("✓ Overfitting check: PASS")
+    print("="*70)
+    print("\n✅ Model ready for predictions!")
+    print("\nNext steps:")
+    print("  1. Run Flask app: python app/app.py")
+    print("  2. Visit: http://127.0.0.1:5001")
+    print("  3. Make predictions!\n")
 
 
 if __name__ == "__main__":
-    model, scaler, metrics = main()
-    print("✅ Model ready for track-specific predictions!\n")
+    main()

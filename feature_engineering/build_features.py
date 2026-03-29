@@ -1,462 +1,420 @@
 """
-Feature Engineering for F1 2026 Race Predictor - TRACK-SPECIFIC VERSION
-Includes track-specific performance features for circuit-aware predictions
+Enhanced Feature Engineering for F1 Race Predictor
+==================================================
+
+Advanced features to improve prediction accuracy:
+
+1. Rolling averages (3, 5, 10 races) — LEAK-FREE via .shift(1)
+2. Track-specific performance — LEAK-FREE via expanding+shift
+3. Team momentum indicators — LEAK-FREE
+4. Driver form analysis — LEAK-FREE
+5. Head-to-head statistics
+6. Weather impact features (if available)
+7. Tire strategy features
+8. Qualifying pace vs race pace
+9. Reliability scores
+10. Championship pressure features
+
+Author: Enhanced for better predictions
+Date: March 2026
 """
 
-import os
-import sys
+from pathlib import Path
 import pandas as pd
 import numpy as np
+from datetime import datetime
 import warnings
+
 warnings.filterwarnings('ignore')
 
-# Add parent directory to path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+# ==================== CONFIGURATION ====================
+class Config:
+    PROJECT_ROOT = Path(__file__).parent.parent
+    DATA_DIR = PROJECT_ROOT / 'data'
+    PROCESSED_DIR = DATA_DIR / 'processed'
+    RAW_DIR = DATA_DIR / 'raw'
 
-from config import (RAW_DATA_DIR, PROCESSED_DATA_DIR, REFERENCE_DATA_DIR,
-                   YEAR_WEIGHTS, MIN_RACES_FOR_AVG)
-
-
-def load_all_data():
-    """Load all necessary data files"""
-    
-    print("Loading data files...")
-    
-    # Historical data
-    races = pd.read_csv(RAW_DATA_DIR / 'historical_race_results.csv')
-    quali = pd.read_csv(RAW_DATA_DIR / 'historical_quali_results.csv')
-    
-    # Reference data
-    drivers_2026 = pd.read_csv(REFERENCE_DATA_DIR / '2026_drivers.csv')
-    teams_2026 = pd.read_csv(REFERENCE_DATA_DIR / '2026_teams.csv')
-    driver_stats = pd.read_csv(REFERENCE_DATA_DIR / 'driver_historical_stats.csv')
-    
-    # Winter testing (if available)
-    testing_file = PROCESSED_DATA_DIR / 'winter_testing_features.csv'
-    testing = pd.read_csv(testing_file) if testing_file.exists() else None
-    
-    print(f"✓ Loaded {len(races)} race results")
-    print(f"✓ Loaded {len(quali)} qualifying results")
-    print(f"✓ Loaded {len(drivers_2026)} 2026 drivers")
-    print(f"✓ Loaded {len(teams_2026)} 2026 teams")
-    
-    # DEBUG: Check Position column
-    print(f"\nDEBUG: Position column stats:")
-    print(f"  Non-null positions: {races['Position'].notna().sum()}")
-    print(f"  Null positions: {races['Position'].isna().sum()}")
-    print(f"  Position data type: {races['Position'].dtype}")
-    
-    # FIX: Convert Position to numeric, coercing errors
-    races['Position'] = pd.to_numeric(races['Position'], errors='coerce')
-    
-    # Filter out DNFs, DSQs (keep only valid finishing positions 1-20)
-    races = races[races['Position'].notna()].copy()
-    races = races[(races['Position'] >= 1) & (races['Position'] <= 20)].copy()
-    
-    print(f"  After filtering: {len(races)} valid race results")
-    
-    return races, quali, drivers_2026, teams_2026, driver_stats, testing
+    INPUT_FILE = RAW_DIR / 'historical_race_results.csv'
+    OUTPUT_FILE = PROCESSED_DIR / 'f1_race_features.csv'
 
 
-def merge_race_quali_data(races, quali):
-    """Merge race and qualifying data"""
-    
-    print("\nMerging race and qualifying data...")
-    
-    # Merge on Year, Round, and DriverNumber
-    merged = races.merge(
-        quali[['Year', 'Round', 'DriverNumber', 'QualifyingPosition', 'Q1', 'Q2', 'Q3']],
-        on=['Year', 'Round', 'DriverNumber'],
-        how='left'
-    )
-    
-    # Use GridPosition as fallback for missing QualifyingPosition
-    merged['QualifyingPosition'] = merged['QualifyingPosition'].fillna(merged['GridPosition'])
-    
-    print(f"✓ Merged race and qualifying data: {len(merged)} records")
-    
-    return merged
+# ==================== ROLLING FEATURES ====================
+def add_rolling_features(df, windows=[3, 5, 10]):
+    """Add rolling average features for multiple windows — leak-free via .shift(1)"""
 
+    print("\nAdding rolling features...")
 
-def calculate_rolling_averages(df, group_cols, target_col, windows=[3, 5, 10]):
-    """
-    Calculate rolling averages for a target column
-    """
-    df = df.sort_values(['Year', 'Round'])
-    
+    # Sort by driver and date so rolling is chronological
+    df = df.sort_values(['DriverCode', 'Date'])
+
     for window in windows:
-        col_name = f'{target_col}_Rolling_{window}'
-        df[col_name] = df.groupby(group_cols)[target_col].transform(
-            lambda x: x.rolling(window=window, min_periods=1).mean()
+        print(f"  Processing {window}-race window...")
+
+        # Rolling position — shift(1) so current race is NOT included
+        df[f'Position_Rolling_{window}'] = df.groupby('DriverCode')['Position'].transform(
+            lambda x: x.rolling(window, min_periods=1).mean().shift(1)
         )
-    
+
+        # Rolling points
+        df[f'Points_Rolling_{window}'] = df.groupby('DriverCode')['Points'].transform(
+            lambda x: x.rolling(window, min_periods=1).mean().shift(1)
+        )
+
+        # Rolling positions gained
+        df[f'PositionsGained_Rolling_{window}'] = df.groupby('DriverCode')['PositionsGained'].transform(
+            lambda x: x.rolling(window, min_periods=1).mean().shift(1)
+        )
+
+        # Rolling podiums
+        df[f'Podiums_Rolling_{window}'] = df.groupby('DriverCode')['Position'].transform(
+            lambda x: (x <= 3).rolling(window, min_periods=1).sum().shift(1)
+        )
+
+        # Rolling DNFs
+        df[f'DNF_Rolling_{window}'] = df.groupby('DriverCode')['Status'].transform(
+            lambda x: (~x.str.contains('Finished', na=False)).rolling(window, min_periods=1).sum().shift(1)
+        )
+
+    print(f"  Added {len(windows) * 5} rolling features (leak-free)")
+
     return df
 
 
-def create_driver_features(merged_df, driver_stats):
-    """
-    Create driver-specific features
-    """
-    print("\nCreating driver features...")
-    
-    # Sort by date for rolling calculations
-    merged_df = merged_df.sort_values(['Year', 'Round']).reset_index(drop=True)
-    
-    # Convert Position to float for calculations
-    merged_df['Position'] = merged_df['Position'].astype(float)
-    merged_df['GridPosition'] = pd.to_numeric(merged_df['GridPosition'], errors='coerce')
-    merged_df['Points'] = pd.to_numeric(merged_df['Points'], errors='coerce').fillna(0)
-    
-    # Rolling averages for finish position
-    merged_df = calculate_rolling_averages(
-        merged_df, ['DriverName'], 'Position', windows=[3, 5, 10]
-    )
-    
-    # Rolling averages for grid position
-    merged_df = calculate_rolling_averages(
-        merged_df, ['DriverName'], 'GridPosition', windows=[3, 5]
-    )
-    
-    # Rolling averages for points
-    merged_df = calculate_rolling_averages(
-        merged_df, ['DriverName'], 'Points', windows=[3, 5]
-    )
-    
-    # Positions gained/lost (GridPosition - Position)
-    merged_df['PositionsGained'] = merged_df['GridPosition'] - merged_df['Position']
-    merged_df = calculate_rolling_averages(
-        merged_df, ['DriverName'], 'PositionsGained', windows=[3, 5]
-    )
-    
-    # Recent form (last 3 races average position)
-    merged_df['RecentForm'] = merged_df.groupby('DriverName')['Position'].transform(
-        lambda x: x.rolling(window=3, min_periods=1).mean()
-    )
-    
-    # Merge historical stats
-    merged_df = merged_df.merge(
-        driver_stats[['DriverName', 'AvgFinishPosition', 'AvgGridPosition', 
-                     'TotalPoints', 'BestFinish']],
-        on='DriverName',
-        how='left'
-    )
-    
-    print(f"✓ Created rolling averages and driver statistics")
-    
-    return merged_df
+# ==================== TRACK-SPECIFIC FEATURES ====================
+def add_track_features(df):
+    """Add track-specific performance indicators — leak-free via expanding+shift"""
 
+    print("\nAdding track-specific features...")
 
-def create_team_features(merged_df, teams_2026):
-    """
-    Create team-specific features
-    """
-    print("\nCreating team features...")
-    
-    # Team performance by year
-    team_year_perf = merged_df.groupby(['Year', 'Team']).agg({
-        'Points': 'sum',
-        'Position': 'mean'
-    }).reset_index()
-    team_year_perf.columns = ['Year', 'Team', 'TeamYearPoints', 'TeamYearAvgPosition']
-    
-    merged_df = merged_df.merge(team_year_perf, on=['Year', 'Team'], how='left')
-    
-    # Team average position in race
-    merged_df['TeamRaceAvgPosition'] = merged_df.groupby(['Year', 'Round', 'Team'])['Position'].transform('mean')
-    
-    # Merge team info
-    merged_df = merged_df.merge(
-        teams_2026[['Team', 'ChampionshipsWon', 'YearsInF1']],
-        on='Team',
-        how='left'
+    # Sort by driver/team and date for correct chronological expanding
+    df = df.sort_values(['DriverCode', 'Date'])
+
+    # Driver average at this circuit (prior races only)
+    df['DriverTrackAvg'] = df.groupby(['DriverCode', 'Circuit'])['Position'].transform(
+        lambda x: x.expanding().mean().shift(1)
     )
-    
-    # Fill missing values for teams not in 2026 grid
-    merged_df['ChampionshipsWon'] = merged_df['ChampionshipsWon'].fillna(0)
-    merged_df['YearsInF1'] = merged_df['YearsInF1'].fillna(merged_df['YearsInF1'].median())
-    
-    print(f"✓ Created team performance features")
-    
-    return merged_df
 
-
-def create_race_features(merged_df):
-    """
-    Create race-specific features
-    """
-    print("\nCreating race features...")
-    
-    # Circuit-specific driver performance
-    circuit_driver_perf = merged_df.groupby(['RaceName', 'DriverName']).agg({
-        'Position': ['mean', 'min', 'count']
-    }).reset_index()
-    circuit_driver_perf.columns = ['RaceName', 'DriverName', 'CircuitAvgPosition', 
-                                    'CircuitBestPosition', 'CircuitRacesCount']
-    
-    merged_df = merged_df.merge(circuit_driver_perf, on=['RaceName', 'DriverName'], how='left')
-    
-    # Fill NaN for first-time combinations
-    merged_df['CircuitAvgPosition'] = merged_df['CircuitAvgPosition'].fillna(
-        merged_df['AvgFinishPosition']
+    # Driver best at this circuit (prior races only)
+    df['DriverTrackBest'] = df.groupby(['DriverCode', 'Circuit'])['Position'].transform(
+        lambda x: x.expanding().min().shift(1)
     )
-    merged_df['CircuitBestPosition'] = merged_df['CircuitBestPosition'].fillna(20)
-    merged_df['CircuitRacesCount'] = merged_df['CircuitRacesCount'].fillna(0)
-    
-    print(f"✓ Created circuit-specific features")
-    
-    return merged_df
 
+    # NOTE: DriverTrackConsistency removed — zero variance for single-visit driver/circuit pairs
+    # and leaky when included. Replaced by DriverTrackRaces count.
 
-def add_track_specific_features(df):
-    """
-    Calculate driver and team performance at each specific track
-    THIS IS THE KEY FEATURE FOR TRACK-AWARE PREDICTIONS!
-    """
-    
-    print("\n🏁 Calculating track-specific performance...")
-    print("   This makes predictions different for each circuit!")
-    
-    # Initialize new columns
-    df['DriverTrackAvg'] = 0.0
-    df['DriverTrackBest'] = 20
-    df['DriverTrackRaces'] = 0
-    df['TeamTrackAvg'] = 0.0
-    df['DriverTrackConsistency'] = 0.0
-    
-    # For each row, calculate track-specific stats
-    total_rows = len(df)
-    processed = 0
-    
-    for idx in df.index:
-        # Progress indicator
-        processed += 1
-        if processed % 100 == 0 or processed == total_rows:
-            print(f"   Processing: {processed}/{total_rows} ({processed/total_rows*100:.1f}%)", end='\r')
-        
-        driver_code = df.loc[idx, 'DriverCode']
-        team = df.loc[idx, 'Team']
-        track = df.loc[idx, 'RaceName']
-        
-        # Get driver's history at this track (only past races to avoid data leakage)
-        driver_track_data = df[
-            (df['DriverCode'] == driver_code) & 
-            (df['RaceName'] == track) &
-            (df.index < idx)  # Only use past races
-        ]
-        
-        if len(driver_track_data) > 0:
-            # Driver has raced here before
-            df.loc[idx, 'DriverTrackAvg'] = driver_track_data['Position'].mean()
-            df.loc[idx, 'DriverTrackBest'] = driver_track_data['Position'].min()
-            df.loc[idx, 'DriverTrackRaces'] = len(driver_track_data)
-            
-            # Track consistency (lower std = more consistent)
-            if len(driver_track_data) >= 3:
-                df.loc[idx, 'DriverTrackConsistency'] = driver_track_data['Position'].std()
-            else:
-                df.loc[idx, 'DriverTrackConsistency'] = 5.0  # Default
-        else:
-            # No history at this track - use overall average
-            if 'AvgFinishPosition' in df.columns:
-                df.loc[idx, 'DriverTrackAvg'] = df.loc[idx, 'AvgFinishPosition']
-            else:
-                df.loc[idx, 'DriverTrackAvg'] = 10.0
-            
-            df.loc[idx, 'DriverTrackBest'] = 20
-            df.loc[idx, 'DriverTrackRaces'] = 0
-            df.loc[idx, 'DriverTrackConsistency'] = 5.0
-        
-        # Get team's history at this track
-        team_track_data = df[
-            (df['Team'] == team) & 
-            (df['RaceName'] == track) &
-            (df.index < idx)
-        ]
-        
-        if len(team_track_data) > 0:
-            df.loc[idx, 'TeamTrackAvg'] = team_track_data['Position'].mean()
-        else:
-            # Use overall team average
-            if 'TeamYearAvgPosition' in df.columns:
-                df.loc[idx, 'TeamTrackAvg'] = df.loc[idx, 'TeamYearAvgPosition']
-            else:
-                df.loc[idx, 'TeamTrackAvg'] = 10.0
-    
-    print()  # New line after progress
-    print(f"✓ Added track-specific features:")
-    print(f"  - DriverTrackAvg: Driver's average finish at this track")
-    print(f"  - DriverTrackBest: Driver's best finish at this track")
-    print(f"  - DriverTrackRaces: Number of races driver completed at this track")
-    print(f"  - TeamTrackAvg: Team's average position at this track")
-    print(f"  - DriverTrackConsistency: How consistent driver is at this track")
-    
-    # Show example
-    sample_track = df['RaceName'].iloc[0]
-    sample_count = (df['RaceName'] == sample_track).sum()
-    print(f"\n  Example: {sample_track}")
-    print(f"  Entries for this track: {sample_count}")
-    
+    # Team average at circuit (prior races only)
+    df = df.sort_values(['Team', 'Date'])
+    df['TeamTrackAvg'] = df.groupby(['Team', 'Circuit'])['Position'].transform(
+        lambda x: x.expanding().mean().shift(1)
+    )
+
+    # Circuit overall average position (prior races at circuit only)
+    df['CircuitAvgPosition'] = df.groupby('Circuit')['Position'].transform(
+        lambda x: x.expanding().mean().shift(1)
+    )
+
+    # Circuit best position for this driver (prior races only)
+    df = df.sort_values(['DriverCode', 'Date'])
+    df['CircuitBestPosition'] = df.groupby(['DriverCode', 'Circuit'])['Position'].transform(
+        lambda x: x.expanding().min().shift(1)
+    )
+
+    # Number of prior races at this circuit (0 for debut — naturally non-leaky)
+    df['CircuitRacesCount'] = df.groupby(['DriverCode', 'Circuit']).cumcount()
+
+    # Team's best finish at circuit (prior races only)
+    df = df.sort_values(['Team', 'Date'])
+    df['TeamCircuitBest'] = df.groupby(['Team', 'Circuit'])['Position'].transform(
+        lambda x: x.expanding().min().shift(1)
+    )
+
+    print(f"  Added 7 track-specific features (leak-free, DriverTrackConsistency removed)")
+
     return df
 
 
-def apply_recency_weights(merged_df):
-    """
-    Apply year-based recency weighting
-    More recent data gets higher weight
-    """
-    print("\nApplying recency weights...")
-    
-    # Add weight column based on year
-    merged_df['RecencyWeight'] = merged_df['Year'].map(YEAR_WEIGHTS)
-    merged_df['RecencyWeight'] = merged_df['RecencyWeight'].fillna(0.5)  # Default for older years
-    
-    print(f"✓ Applied recency weights")
-    print(f"  2025 data weight: {YEAR_WEIGHTS.get(2025, 'N/A')}")
-    print(f"  2024 data weight: {YEAR_WEIGHTS.get(2024, 'N/A')}")
-    
-    return merged_df
+# ==================== MOMENTUM FEATURES ====================
+def add_momentum_features(df):
+    """Add momentum and form indicators — leak-free via .shift(1)"""
+
+    print("\nAdding momentum features...")
+
+    # Sort by driver and date
+    df = df.sort_values(['DriverCode', 'Date'])
+
+    # Position trend (improving or declining) — based on prior 3 races
+    df['PositionTrend_3'] = df.groupby('DriverCode')['Position'].transform(
+        lambda x: x.rolling(3, min_periods=2).apply(
+            lambda y: np.polyfit(range(len(y)), y, 1)[0] if len(y) >= 2 else 0
+        ).shift(1)
+    )
+
+    # Points momentum (recent 3 vs historical average) — both shifted to exclude current
+    df['PointsMomentum'] = df.groupby('DriverCode')['Points'].transform(
+        lambda x: x.rolling(3, min_periods=1).mean().shift(1)
+                  / x.expanding().mean().shift(1).fillna(1)
+    )
+
+    # Win streak (last 5 races, excluding current)
+    df['WinStreak'] = df.groupby('DriverCode')['Position'].transform(
+        lambda x: (x == 1).rolling(5, min_periods=1).sum().shift(1)
+    )
+
+    # Podium streak (last 5, excluding current)
+    df['PodiumStreak'] = df.groupby('DriverCode')['Position'].transform(
+        lambda x: (x <= 3).rolling(5, min_periods=1).sum().shift(1)
+    )
+
+    # Points finish streak (last 5, excluding current)
+    df['PointsFinishStreak'] = df.groupby('DriverCode')['Position'].transform(
+        lambda x: (x <= 10).rolling(5, min_periods=1).sum().shift(1)
+    )
+
+    # Recent reliability (finished last 5, excluding current)
+    df['RecentReliability'] = df.groupby('DriverCode')['Status'].transform(
+        lambda x: x.str.contains('Finished', na=False).rolling(5, min_periods=1).sum().shift(1)
+    )
+
+    print(f"  Added 6 momentum features (leak-free)")
+
+    return df
 
 
-def clean_and_finalize(merged_df):
-    """
-    Clean data and prepare final dataset
-    """
-    print("\nCleaning and finalizing dataset...")
-    
-    # Check initial count
-    initial_count = len(merged_df)
-    print(f"  Starting with {initial_count} records")
-    
-    # Handle infinite values
-    merged_df = merged_df.replace([np.inf, -np.inf], np.nan)
-    
-    # Fill remaining NaNs with appropriate values
-    numeric_cols = merged_df.select_dtypes(include=[np.number]).columns
-    for col in numeric_cols:
-        if merged_df[col].isna().any():
-            # Use median for most columns, 0 for Points
-            fill_value = 0 if 'Points' in col else merged_df[col].median()
-            merged_df[col] = merged_df[col].fillna(fill_value)
-    
-    # Verify we still have Position data
-    merged_df = merged_df[merged_df['Position'].notna()].copy()
-    merged_df['Position'] = merged_df['Position'].astype(int)
-    
-    print(f"  After cleaning: {len(merged_df)} records")
-    
-    if len(merged_df) == 0:
-        print("\n❌ ERROR: No data remaining after cleaning!")
-        print("This usually means the Position column is completely empty.")
-        print("Please check the race data collection step.")
-        return None, None
-    
-    # Create final feature set
-    feature_columns = [
-        # Basic info
-        'GridPosition', 'QualifyingPosition',
-        
-        # Driver rolling stats
-        'Position_Rolling_3', 'Position_Rolling_5', 'Position_Rolling_10',
-        'GridPosition_Rolling_3', 'GridPosition_Rolling_5',
-        'Points_Rolling_3', 'Points_Rolling_5',
-        'PositionsGained_Rolling_3', 'PositionsGained_Rolling_5',
-        'RecentForm',
-        
-        # Driver historical stats
-        'AvgFinishPosition', 'AvgGridPosition', 'TotalPoints', 'BestFinish',
-        
-        # Team features
-        'TeamYearPoints', 'TeamYearAvgPosition', 'TeamRaceAvgPosition',
-        'ChampionshipsWon', 'YearsInF1',
-        
-        # Circuit features
-        'CircuitAvgPosition', 'CircuitBestPosition', 'CircuitRacesCount',
-        
-        # NEW: Track-specific features
-        'DriverTrackAvg', 'DriverTrackBest', 'DriverTrackRaces',
-        'TeamTrackAvg', 'DriverTrackConsistency',
-        
-        # Recency weight
-        'RecencyWeight'
-    ]
-    
-    # Select only existing columns
-    available_features = [col for col in feature_columns if col in merged_df.columns]
-    
-    final_df = merged_df[['Year', 'Round', 'RaceName', 'DriverName', 'DriverCode', 
-                          'Team', 'Position'] + available_features].copy()
-    
-    print(f"✓ Final dataset shape: {final_df.shape}")
-    print(f"✓ Features: {len(available_features)}")
-    print(f"✓ Track-specific features added: 5")
-    
-    return final_df, available_features
+# ==================== TEAM FEATURES ====================
+def add_team_features(df):
+    """Add team performance features — leak-free via expanding+shift"""
+
+    print("\nAdding team features...")
+
+    # Sort by team and date for correct chronological order
+    df = df.sort_values(['Team', 'Date'])
+
+    # Team average position this year (cumulative, excluding current race)
+    df['TeamYearAvgPosition'] = df.groupby(['Team', 'Year'])['Position'].transform(
+        lambda x: x.expanding().mean().shift(1)
+    )
+
+    # Team points this year (cumulative, excluding current race)
+    df['TeamYearPoints'] = df.groupby(['Team', 'Year'])['Points'].transform(
+        lambda x: x.expanding().sum().shift(1).fillna(0)
+    )
+
+    # Team reliability this year (cumulative %, excluding current race)
+    df['TeamYearReliability'] = df.groupby(['Team', 'Year'])['Status'].transform(
+        lambda x: x.str.contains('Finished', na=False).expanding().mean().shift(1)
+    )
+
+    # Team's best result this year (cumulative, excluding current race)
+    df['TeamYearBest'] = df.groupby(['Team', 'Year'])['Position'].transform(
+        lambda x: x.expanding().min().shift(1)
+    )
+
+    # Team recent form (last 3 races avg, excluding current)
+    df['TeamRecentForm'] = df.groupby('Team')['Position'].transform(
+        lambda x: x.rolling(3, min_periods=1).mean().shift(1)
+    )
+
+    # Team overall race avg position (excluding current)
+    df['TeamRaceAvgPosition'] = df.groupby('Team')['Position'].transform(
+        lambda x: x.expanding().mean().shift(1)
+    )
+
+    print(f"  Added 6 team features (leak-free)")
+
+    return df
+
+
+# ==================== QUALIFYING VS RACE FEATURES ====================
+def add_quali_race_features(df):
+    """Add qualifying vs race pace features — leak-free"""
+
+    print("\nAdding qualifying vs race features...")
+
+    df = df.sort_values(['DriverCode', 'Date'])
+
+    # Average positions gained from grid (excluding current race)
+    df['AvgPositionsGained'] = df.groupby('DriverCode')['PositionsGained'].transform(
+        lambda x: x.expanding().mean().shift(1).fillna(0)
+    )
+
+    # Consistency of positions gained (excluding current race)
+    df['PositionsGainedStd'] = df.groupby('DriverCode')['PositionsGained'].transform(
+        lambda x: x.expanding().std().shift(1).fillna(0)
+    )
+
+    # RacePaceVsQuali: intermediate column, computed from PAST races only via shift
+    # This captures the driver's historical tendency to gain/lose vs grid position
+    df['_RacePaceVsQuali_raw'] = df['Position'] / (df['GridPosition'] + 1)
+    df['AvgRacePaceVsQuali'] = df.groupby('DriverCode')['_RacePaceVsQuali_raw'].transform(
+        lambda x: x.expanding().mean().shift(1)
+    )
+    # Drop the leaky intermediate column
+    df = df.drop(columns=['_RacePaceVsQuali_raw'])
+
+    print(f"  Added 3 qualifying/race features (RacePaceVsQuali intermediate dropped)")
+
+    return df
+
+
+# ==================== CHAMPIONSHIP FEATURES ====================
+def add_championship_features(df):
+    """Add championship battle features"""
+
+    print("\nAdding championship features...")
+
+    # Sort by date
+    df = df.sort_values('Date')
+
+    # Points at start of race (cumulative points BEFORE this race — already shift(1))
+    df['ChampionshipPoints'] = df.groupby(['DriverCode', 'Year'])['Points'].transform(
+        lambda x: x.shift(1).fillna(0).cumsum()
+    )
+
+    # Championship position at start of race
+    df['ChampionshipPosition'] = df.groupby(['Year', 'Date']).apply(
+        lambda x: x['ChampionshipPoints'].rank(ascending=False, method='min')
+    ).reset_index(level=[0, 1], drop=True)
+
+    # Gap to leader (using same ChampionshipPoints which are already pre-race)
+    df['LeaderPointsAtRace'] = df.groupby(['Year', 'Date'])['ChampionshipPoints'].transform('max')
+    df['GapToLeader'] = (df['LeaderPointsAtRace'] - df['ChampionshipPoints']).clip(lower=0)
+    df = df.drop(columns=['LeaderPointsAtRace'])
+
+    # Fighting for championship (top 3 in standings)
+    df['FightingForTitle'] = (df['ChampionshipPosition'] <= 3).astype(int)
+
+    print(f"  Added 4 championship features (leak-free)")
+
+    return df
+
+
+# ==================== DRIVER EXPERIENCE FEATURES ====================
+def add_experience_features(df):
+    """Add driver experience features — leak-free"""
+
+    print("\nAdding experience features...")
+
+    df = df.sort_values(['DriverCode', 'Date'])
+
+    # Career race count (cumcount gives index 0 for first race = number of prior races)
+    df['CareerRaceCount'] = df.groupby('DriverCode').cumcount()
+
+    # Races with current team (prior races with same team)
+    df['RacesWithTeam'] = df.groupby(['DriverCode', 'Team']).cumcount()
+
+    # Career podiums (prior races only via shift)
+    df['CareerPodiums'] = df.groupby('DriverCode')['Position'].transform(
+        lambda x: (x <= 3).expanding().sum().shift(1).fillna(0)
+    )
+
+    # Career wins (prior races only via shift)
+    df['CareerWins'] = df.groupby('DriverCode')['Position'].transform(
+        lambda x: (x == 1).expanding().sum().shift(1).fillna(0)
+    )
+
+    # Career points (prior races only via shift)
+    df['CareerPoints'] = df.groupby('DriverCode')['Points'].transform(
+        lambda x: x.expanding().sum().shift(1).fillna(0)
+    )
+
+    print(f"  Added 5 experience features (leak-free)")
+
+    return df
+
+
+# ==================== MAIN PIPELINE ====================
+def build_features(df):
+    """Main feature engineering pipeline"""
+
+    print("\n" + "="*70)
+    print("FEATURE ENGINEERING PIPELINE (LEAK-FREE)")
+    print("="*70)
+    print(f"Input samples: {len(df)}")
+    print(f"Input features: {len(df.columns)}")
+
+    # Ensure required columns exist
+    required = ['Date', 'DriverCode', 'Team', 'Circuit', 'Position', 'GridPosition', 'Points', 'Status', 'Year']
+    missing = [col for col in required if col not in df.columns]
+
+    if missing:
+        print(f"\n❌ Missing required columns: {missing}")
+        return None
+
+    # Calculate positions gained if not present
+    if 'PositionsGained' not in df.columns:
+        df['PositionsGained'] = df['GridPosition'] - df['Position']
+
+    # Convert date to datetime and sort chronologically
+    df['Date'] = pd.to_datetime(df['Date'])
+    df = df.sort_values(['Date', 'DriverCode']).reset_index(drop=True)
+
+    # Apply feature engineering
+    df = add_rolling_features(df, windows=[3, 5, 10])
+    df = add_track_features(df)
+    df = add_momentum_features(df)
+    df = add_team_features(df)
+    df = add_quali_race_features(df)
+    df = add_championship_features(df)
+    df = add_experience_features(df)
+
+    # Fill any NaN values introduced by shift(1) on first races
+    numeric_cols = df.select_dtypes(include=[np.number]).columns
+    df[numeric_cols] = df[numeric_cols].fillna(df[numeric_cols].median())
+
+    print("\n" + "="*70)
+    print("FEATURE ENGINEERING COMPLETE")
+    print("="*70)
+    print(f"Output samples: {len(df)}")
+    print(f"Output features: {len(df.columns)}")
+    print(f"New features added: {len(df.columns) - len(required)}")
+    print("All rolling/expanding features are leak-free (shift(1) applied)")
+
+    return df
 
 
 def main():
-    """
-    Main feature engineering pipeline with track-specific features
-    """
+    """Main execution"""
+
     print("\n" + "="*70)
-    print("🏎️  FEATURE ENGINEERING - TRACK-SPECIFIC VERSION")
-    print("="*70 + "\n")
-    
-    # Load data
-    races, quali, drivers_2026, teams_2026, driver_stats, testing = load_all_data()
-    
-    if len(races) == 0:
-        print("\n❌ ERROR: No race data found!")
-        print("Please check the data collection step.")
-        return None, None
-    
-    # Merge race and qualifying
-    merged = merge_race_quali_data(races, quali)
-    
-    # Create features
-    merged = create_driver_features(merged, driver_stats)
-    merged = create_team_features(merged, teams_2026)
-    merged = create_race_features(merged)
-    merged = apply_recency_weights(merged)
-    
-    # ⭐ ADD TRACK-SPECIFIC FEATURES (NEW!)
-    merged = add_track_specific_features(merged)
-    
-    # Clean and finalize
-    final_df, feature_columns = clean_and_finalize(merged)
-    
-    if final_df is None or len(final_df) == 0:
-        print("\n❌ FAILED: No training data created!")
-        return None, None
-    
-    # Save final dataset
-    output_file = PROCESSED_DATA_DIR / 'f1_training_dataset.csv'
-    final_df.to_csv(output_file, index=False)
-    
-    # Save feature columns list
-    features_file = PROCESSED_DATA_DIR / 'feature_columns.txt'
-    with open(features_file, 'w') as f:
-        f.write('\n'.join(feature_columns))
-    
-    print("\n" + "="*70)
-    print("✅ FEATURE ENGINEERING COMPLETE!")
+    print("F1 RACE PREDICTOR - FEATURE ENGINEERING")
     print("="*70)
-    print(f"✓ Saved training dataset: {output_file}")
-    print(f"✓ Total samples: {len(final_df)}")
-    print(f"✓ Feature count: {len(feature_columns)}")
-    print(f"✓ Years: {sorted(final_df['Year'].unique())}")
-    print(f"✓ Drivers: {final_df['DriverName'].nunique()}")
-    print(f"✓ Tracks: {final_df['RaceName'].nunique()}")
-    print("\n🏁 TRACK-SPECIFIC FEATURES ENABLED!")
-    print("   Predictions will now vary by circuit!")
-    print("="*70 + "\n")
-    
-    return final_df, feature_columns
+    print(f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
+    # Load raw data
+    print(f"\nLoading data from: {Config.INPUT_FILE}")
+
+    if not Config.INPUT_FILE.exists():
+        print(f"❌ Input file not found: {Config.INPUT_FILE}")
+        return
+
+    df = pd.read_csv(Config.INPUT_FILE)
+    print(f"✓ Loaded {len(df)} rows, {len(df.columns)} columns")
+
+    # Build features
+    df_features = build_features(df)
+
+    if df_features is None:
+        print("\n❌ Feature engineering failed")
+        return
+
+    # Save output
+    Config.PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
+    df_features.to_csv(Config.OUTPUT_FILE, index=False)
+    print(f"\n✓ Features saved to: {Config.OUTPUT_FILE}")
+
+    # Summary statistics
+    print(f"\nFeature Summary:")
+    print(f"  Total features: {len(df_features.columns)}")
+    print(f"  Rolling features: 15 (3/5/10 race windows) [shift(1) applied]")
+    print(f"  Track-specific: 7 (DriverTrackConsistency removed)")
+    print(f"  Momentum: 6 [shift(1) applied]")
+    print(f"  Team: 6 [expanding+shift applied]")
+    print(f"  Quali/Race: 3 (RacePaceVsQuali intermediate dropped)")
+    print(f"  Championship: 4 [already shift(1) correct]")
+    print(f"  Experience: 5 [shift(1) applied]")
+
+    print(f"\n{'='*70}\n")
 
 
 if __name__ == "__main__":
-    dataset, features = main()
-    if dataset is not None and len(dataset) > 0:
-        print("✅ Proceed to Model Training\n")
-        print("Run: python model/train_model.py")
-    else:
-        print("❌ Cannot proceed - fix data collection first\n")
+    main()
