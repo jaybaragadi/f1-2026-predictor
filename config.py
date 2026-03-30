@@ -1,7 +1,5 @@
 """
 Configuration for F1 2026 Race Predictor
-CORRECTED VERSION - Accurate 2025 final grid + 2026 changes
-Based on actual mid-season changes and team transitions
 """
 
 import os
@@ -26,14 +24,13 @@ YEAR_WEIGHTS = {
     2023: 0.5,
 }
 
-# Quick fix - add this line to your config.py after line 27
-
-# Add this after YEAR_WEIGHTS:
 MIN_RACES_FOR_AVG = 3
 RETRAIN_AFTER_RACES = 1
 SECRET_KEY = os.getenv('SECRET_KEY', 'f1-2026-predictor-dev')
+# HOST/PORT: 0.0.0.0 + $PORT env var used in production (Render).
+# Locally, PORT defaults to 5001.
 HOST = '0.0.0.0'
-PORT = int(os.getenv('PORT', 8080))
+PORT = int(os.getenv('PORT', 5001))
 CORS_ORIGINS = ['*']
 
 # Model training

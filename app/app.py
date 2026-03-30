@@ -22,10 +22,14 @@ from config import (
     DRIVERS_2026,
     TEAMS_2026,
     REFERENCE_DATA_DIR,
+    HOST,
+    PORT,
+    SECRET_KEY,
 )
 
 # -------------------- Flask App --------------------
 app = Flask(__name__)
+app.secret_key = SECRET_KEY
 CORS(app)
 
 predictor = None
@@ -352,7 +356,7 @@ def init_predictor():
     if model_loaded:
         # Read accuracy from metadata file if available
         meta_file = MODEL_DIR / "model_metadata.json"
-        saved_accuracy = "83.9%"
+        saved_accuracy = "N/A"
         if meta_file.exists():
             import json
             try:
@@ -541,4 +545,4 @@ def health_check():
 
 if __name__ == "__main__":
     init_predictor()
-    app.run(host="127.0.0.1", port=5001, debug=False, use_reloader=False)
+    app.run(host=HOST, port=PORT, debug=False, use_reloader=False)
